@@ -1,0 +1,50 @@
+name: Check and deploy GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: read
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm run check
+      - run: npm run build
+      - name: Docker build and runtime smoke
+        run: |
+          docker build -t decision-atelier:ci .
+          docker run -d --name decision-atelier-ci --read-only --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:8080:8080 decision-atelier:ci
+          trap 'docker logs decision-atelier-ci; docker rm -f decision-atelier-ci' EXIT
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/healthz && break || sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/healthz | grep -q ok
+          curl -fsS http://127.0.0.1:8080/ | grep -q "Decision Atelier"
+          curl -fsSI http://127.0.0.1:8080/ | grep -qi "Content-Security-Policy"
+          test "$(docker exec decision-atelier-ci id -u)" != 0
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+  deploy:
+    needs: check
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
