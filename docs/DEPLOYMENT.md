@@ -50,6 +50,6 @@ gcloud run deploy decision-atelier \
 - This remains a public static frontend. The user's browser calls OpenRouter directly, so there is no shared server key to protect and no backend inference bill for the publisher.
 - Do not add `OPENROUTER_API_KEY` to a public build. This app does not read it.
 - Verify health, HTTPS, headers, relative assets and UI after deployment. Review Google Cloud budgets and actual billing separately.
-- Container build and Cloud Run deployment were not executed in the initial workspace; see the verification record.
+- The container build and runtime smoke test pass in GitHub Actions. Cloud Run deployment itself was not performed; see the verification record.
 
 Official references: [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages), [Cloud Run deployment from source](https://cloud.google.com/run/docs/deploying-source-code), [Cloud Run pricing](https://cloud.google.com/run/pricing).
