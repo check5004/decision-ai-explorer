@@ -2,3 +2,4 @@
 /* Grid children must be allowed to shrink below the illustration's preferred width. */
 .hero-copy,.hero-art{min-width:0}
 @media(max-width:800px){.hero{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:500px){.hero-actions{flex-direction:column;align-items:flex-start;gap:12px}.hero-actions .primary-button{white-space:nowrap}.hero-footnote{font-size:9px}}
