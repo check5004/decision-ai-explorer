@@ -8,7 +8,11 @@ Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here di
 - Delete clears active memory plus the stored entry and verifies deletion. Read/write/delete failures are visible and never reported as successful. Authentication rejection removes the rejected key only while it is still the saved value; an older rejection preserves a newer saved key. Other tabs follow storage changes.
 - UI and security documentation explain plaintext browser storage, same-origin access, shared-device risk, and the deletion action.
 - New regression tests use only a clearly synthetic credential. They cover restoration, deletion and reload, blocked read/write/delete, silent storage failures, invalid values, other-tab removal, an old rejection racing a newer saved key, and credential redaction from error display, console, URLs and exported diagnostics.
-- Full Node/browser/Docker checks are pending review-branch CI. No real key was read, entered, saved or sent by the maintainers.
+- [Review-branch CI run 38834558494](https://github.com/check5004/decision-ai-explorer/actions/runs/38834558494), implementation commit `daa5e108ca8b0e7fa9e108e86d7278318187a578`: all 33 Node tests and 22 isolated browser tests passed (0 failures); static checks/build and Docker smoke also passed. Pages deployment was skipped on the review branch.
+- Independent read-only reviews accepted the model mapping and credential handling. A cross-tab old-401/new-key race found during review was fixed and its deterministic regression passed in the run above.
+- The browser checks include desktop and Pixel 7 Chromium emulation, masked saved-key dialogs, reload/deletion/failure states, and mobile dialog width. TEST-ONLY-MOCK screenshots are CI evidence, not live inference results. The cloud browser and local shell are unavailable for this correction; these new screenshots have not received a manual visual review.
+- Production deployment additionally compares SHA256 of all nine published assets to its exact commit at the fixed Pages URL, with bounded propagation retries. That read-only check runs after the main-only deploy; it makes no model request.
+- No real key was read, entered, saved or sent by the maintainers.
 
 ## Canonical model identity correction (2026-10-16 UTC)
 
@@ -16,7 +20,7 @@ Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here di
 - The request alias is unchanged. Identity inspection and latency aggregation both accept only the requested alias or this one exact documented canonical ID. There is no prefix match, date regex, auto-discovery call, or model fallback. Unknown identifiers still trigger a warning and remain excluded.
 - Both raw IDs and the canonical-match source/date are retained in diagnostics and JSON exports.
 - The user reported the displayed returned ID. That report alone does not establish answer correctness, actual response timing, or successful end-to-end inference verified by the maintainers. No real key or paid inference is used for this correction.
-- Regression coverage adds exact canonical acceptance, lookalike/unknown-date rejection, mixed timing aggregation, unchanged request/response IDs, and isolated browser checks for accepted and unknown IDs. The selected local execution environment is unavailable; full tests will run in the review branch CI before production publication.
+- Regression coverage adds exact canonical acceptance, lookalike/unknown-date rejection, mixed timing aggregation, unchanged request/response IDs, and isolated browser checks for accepted and unknown IDs. The selected local execution environment is unavailable; these checks passed in review-branch CI run 38834558494 above.
 
 ## UX revision (2026-10-16 UTC)
 
