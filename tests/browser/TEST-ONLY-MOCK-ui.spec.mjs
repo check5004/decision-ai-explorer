@@ -362,3 +362,22 @@ test('TEST-ONLY-MOCK rejected saved key is deleted and redacted from UI, logs, U
   await expect(page.locator('#run-button')).toBeDisabled();
   expect(mockNetwork.requests).toHaveLength(1);
 });
+
+test('TEST-ONLY-MOCK an old authentication rejection cannot delete a newer saved key before its storage event', async ({ page, mockNetwork }) => {
+  await openApp(page);
+  const release = mockNetwork.queue({ error: { message: 'TEST-ONLY-MOCK old key rejected' } }, { status: 401, hold: true });
+  await connectMockKey(page);
+  await page.locator('#run-button').click();
+  await expect.poll(() => mockNetwork.requests.length).toBe(1);
+  const newerKey = 'sk-or-v1-TEST_ONLY_MOCK_NEWER_NOT_REAL_KEY';
+  // Same-document storage write deliberately produces no storage event, making the race deterministic.
+  await page.evaluate(({ name, value }) => localStorage.setItem(name, value), { name: KEY_STORAGE_NAME, value: newerKey });
+  release();
+  await expect(page.locator('#live-status')).toHaveText('取得に失敗');
+  await expect(page.locator('#key-storage-notice')).toContainText('新しく保存されたキーは保持');
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBe(newerKey);
+  await expect(page.locator('#connection-label')).toHaveText('キー保存済み');
+  await expect(page.locator('#run-button')).toBeEnabled();
+  await expect(page.locator('body')).not.toContainText(newerKey);
+  expect(mockNetwork.requests).toHaveLength(1);
+});

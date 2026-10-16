@@ -5,9 +5,9 @@ Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here di
 ## Browser key persistence (2026-10-16 UTC)
 
 - At the user's request, explicit Save now persists their own UI-entered key in one app-specific localStorage entry. Reload restores it without making a request; result/history persistence is unchanged. The password field is cleared and never repopulated with the saved value.
-- Delete clears active memory plus the stored entry and verifies deletion. Read/write/delete failures are visible and never reported as successful. Authentication rejection removes the saved key. Other tabs follow storage changes.
+- Delete clears active memory plus the stored entry and verifies deletion. Read/write/delete failures are visible and never reported as successful. Authentication rejection removes the rejected key only while it is still the saved value; an older rejection preserves a newer saved key. Other tabs follow storage changes.
 - UI and security documentation explain plaintext browser storage, same-origin access, shared-device risk, and the deletion action.
-- New regression tests use only a clearly synthetic credential. They cover restoration, deletion and reload, blocked read/write/delete, silent storage failures, invalid values, other-tab removal, and credential redaction from error display, console, URLs and exported diagnostics.
+- New regression tests use only a clearly synthetic credential. They cover restoration, deletion and reload, blocked read/write/delete, silent storage failures, invalid values, other-tab removal, an old rejection racing a newer saved key, and credential redaction from error display, console, URLs and exported diagnostics.
 - Full Node/browser/Docker checks are pending review-branch CI. No real key was read, entered, saved or sent by the maintainers.
 
 ## Canonical model identity correction (2026-10-16 UTC)

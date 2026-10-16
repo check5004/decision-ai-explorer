@@ -212,17 +212,17 @@ async function run() {
   const record = currentRecord(); let request;
   try { request = buildRequest(record.state, record.questions); } catch (error) { showValidation(error.message); return; }
   running = true; sessionAttempts++; lastAttemptAt = Date.now(); showValidation('');
-  const controller = new AbortController(); activeController = controller;
+  const controller = new AbortController(); activeController = controller; const requestKey = apiKey;
   const timeout = setTimeout(() => controller.abort('timeout'), LIMITS.timeoutMs);
   record.request = request; record.sentState = record.state; record.sentQuestions = record.questions; record.error = null; record.result = null;
   updateControls(); renderGallery(); renderOutput(); renderSession();
   try {
-    record.result = await requestDecision({ request, key: apiKey, signal: controller.signal });
+    record.result = await requestDecision({ request, key: requestKey, signal: controller.signal });
     history.push({ result: record.result });
   } catch (error) {
     record.error = { message: error.message, status: error.status ?? null, body: error.body ?? null, timing: error.timing ?? null };
     history.push({ error: record.error });
-    if (error.status === 401 || error.status === 403) removeKey('認証が拒否されたため、保存したキーを削除しました。キーを確認して再設定してください。');
+    if (error.status === 401 || error.status === 403) removeRejectedKey(requestKey);
   } finally {
     clearTimeout(timeout); running = false; activeController = null;
     renderOutput(); renderGallery(); renderSession(); updateControls();
@@ -241,6 +241,19 @@ function restoreKey() {
   if (saved.status === 'unavailable') keyNotice('保存したキーを読み込めません。このタブではキーを使用しません。ブラウザーの保存設定を確認してください。', true);
   else if (saved.status === 'invalid') keyNotice('保存したキーの形式を確認できません。「APIキーを設定」から保存データを削除し、再設定してください。', true);
   else keyNotice('');
+}
+function removeRejectedKey(rejectedKey) {
+  // A response can settle before another tab's storage event arrives.
+  // Never let an older request's rejection delete a newer saved credential.
+  const saved = readSavedKey();
+  if (saved.status === 'saved' && saved.key === rejectedKey) {
+    removeKey('認証が拒否されたため、保存したキーを削除しました。キーを確認して再設定してください。');
+  } else if (saved.status === 'saved') {
+    apiKey = saved.key; $('api-key').value = ''; $('consent').checked = true;
+    keyNotice('前のキーの認証が拒否されました。新しく保存されたキーは保持しています。'); updateControls();
+  } else {
+    restoreKey(); updateControls();
+  }
 }
 function openConnection() {
   if (running) return;
