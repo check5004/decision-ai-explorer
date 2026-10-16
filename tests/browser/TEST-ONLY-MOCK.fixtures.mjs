@@ -122,6 +122,14 @@ export async function saveMockScreenshot(page, testInfo, state) {
   const path = testInfo.outputPath(filename);
   await page.screenshot({ path, fullPage: true });
   await testInfo.attach(filename, { path, contentType: 'image/png' });
+  // Small labeled CI-only previews allow visual review when no local image viewer exists.
+  // Only fixed synthetic comparison cases qualify; never run against user data or live credentials.
+  if (process.env.CI && ['five-model-comparison-desktop', 'five-model-comparison-mobile'].includes(state)) {
+    await page.locator('.model-result').first().scrollIntoViewIfNeeded();
+    const preview = await page.screenshot({ type: 'jpeg', quality: 20, fullPage: false });
+    if (preview.length <= 90000) console.log('TEST_ONLY_MOCK_PREVIEW ' + state + ' ' + preview.toString('base64'));
+  }
+
 }
 
 test.afterEach(async ({ page }, testInfo) => {
