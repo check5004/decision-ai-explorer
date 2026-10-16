@@ -10,6 +10,7 @@ test('static server serves only allowlisted public assets with safe headers and 
   try {
     const home = await fetch(base); assert.equal(home.status, 200); assert.match(await home.text(), /Decision Atelier/); assert.match(home.headers.get('content-security-policy'), /frame-ancestors 'none'/); assert.equal(home.headers.get('x-content-type-options'), 'nosniff');
     assert.equal((await fetch(`${base}/healthz`)).status, 200);
+    assert.equal((await fetch(`${base}/presentation.js`)).status, 200);
     const malformed = await new Promise((resolve, reject) => {
       const socket = connect(server.address().port, '127.0.0.1', () => socket.write('GET // HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'));
       let received = ''; socket.on('data', chunk => received += chunk); socket.on('end', () => resolve(received)); socket.on('error', reject);

@@ -6,7 +6,7 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://openrouter.ai; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="description" content="Microsoft Decision-1の実APIで、判断から生まれるプロダクトを考える。6つの架空のユースケースを1ページで試す、小さな実験室。">
-  <title>Decision Atelier — 判断から、体験を。</title>
+  <title>Decision Atelier — 判断AIを6つのお題で試す</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script type="module" src="./app.js"></script>
@@ -14,44 +14,55 @@
 <body>
   <a class="skip-link" href="#workspace">実験エリアへスキップ</a>
   <header class="site-header"><div class="header-inner">
-    <a class="brand" href="#top" aria-label="Decision Atelier ホーム"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Decision <b>Atelier</b><small>SMALL DECISIONS, NEW POSSIBILITIES.</small></span></a>
-    <nav aria-label="ページ内メニュー"><a href="#examples">できること</a><a href="#how-it-works">しくみ</a><button class="connection-trigger" id="open-connection"><span class="status-dot" id="connection-dot"></span><span id="connection-label">APIキーを設定</span><span aria-hidden="true">↗</span></button></nav>
+    <a class="brand" href="#top" aria-label="Decision Atelier ホーム"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Decision Atelier<small>判断AIを、6つのお題で試す</small></span></a>
+    <button class="connection-trigger" id="open-connection"><span class="status-dot" id="connection-dot"></span><span id="connection-label">APIキーを設定</span></button>
   </div></header>
   <main id="top">
-    <section class="hero section-shell" aria-labelledby="hero-title">
-      <div class="hero-copy"><div class="eyebrow"><span class="tiny-square"></span> MICROSOFT DECISION-1 · FEATURE GALLERY</div>
-        <h1 id="hero-title">入力から、<span class="title-orange">判断を。</span><br>判断から、<span class="title-serif">体験を。</span></h1>
-        <p class="hero-description">「選ぶ・見極める・測る」を、プロダクトの小さな部品に。<br class="desktop-break">実際のAPIを動かして、次のアイデアを見つける実験室。</p>
-        <div class="hero-actions"><a class="primary-button" href="#examples">6つのアイデアを試す <span aria-hidden="true">↓</span></a><span class="hero-footnote">架空のデータで、小さく始める。</span></div>
+    <section class="intro section-shell" aria-labelledby="hero-title">
+      <p class="intro-model">Microsoft Decision-1 / OpenRouter</p>
+      <h1 id="hero-title">AIに、どんな判断を任せる？</h1>
+      <p class="intro-description">お題を選び、条件を変えて実行。AIの判断を、日本語の候補・割合・評価で確認できます。</p>
+      <ol class="quick-steps" aria-label="使い方"><li><span>1</span>お題を選ぶ</li><li><span>2</span>条件を編集する</li><li><span>3</span>結果と割合を見る</li></ol>
+    </section>
+    <section id="examples" class="examples-section section-shell" aria-labelledby="examples-title">
+      <div class="section-heading"><h2 id="examples-title">1. 試すお題を選ぶ</h2><p>すべて架空のデータです</p></div>
+      <div id="example-grid" class="example-grid"></div>
+    </section>
+    <section id="workspace" class="workspace-section section-shell" aria-labelledby="workspace-title">
+      <div class="workspace-heading"><div><p class="section-kicker">選択中のお題</p><h2 id="workspace-title" tabindex="-1"></h2><p id="active-benefit" class="active-benefit"></p></div><span class="badge neutral" id="live-status">未実行</span></div>
+      <div id="scenario-flow" class="scenario-flow" aria-label="このお題で試すこと"></div>
+      <div class="workbench">
+        <section class="input-panel" aria-labelledby="input-title"><div class="panel-topline"><h3 id="input-title">2. 条件を確認・編集</h3><button class="text-button" id="reset-example">初期値に戻す</button></div>
+          <div id="friendly-fields" class="friendly-fields"></div>
+          <div id="validation-error" class="error-message" role="alert" hidden></div>
+          <div class="run-row"><button id="run-button" class="primary-button" disabled><span id="run-label">この条件で判断する</span><span aria-hidden="true">→</span></button><button id="cancel-button" class="secondary-button" hidden>通信を中断</button></div>
+          <button id="connect-inline" class="text-button connect-inline">実行するにはAPIキーを設定 →</button>
+          <p class="run-disclosure">1クリックで有料APIを1回呼びます。入力はOpenRouterとモデル提供元に送られます。</p>
+          <details class="advanced-settings" id="advanced-settings"><summary>詳細設定：JSON・判断基準を編集</summary>
+            <p>通常は上の項目だけで試せます。ここでは入力と判断基準を直接変更できます。</p>
+            <div class="editor-tabs" role="tablist" aria-label="詳細編集"><button id="state-tab" role="tab" aria-selected="true" aria-controls="state-editor-panel" tabindex="0">入力JSON</button><button id="questions-tab" role="tab" aria-selected="false" aria-controls="questions-editor-panel" tabindex="-1">判断基準JSON</button></div>
+            <div id="state-editor-panel" role="tabpanel" aria-labelledby="state-tab"><label class="visually-hidden" for="state-editor">入力のJSON</label><textarea id="state-editor" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="soft"></textarea></div>
+            <div id="questions-editor-panel" role="tabpanel" aria-labelledby="questions-tab" hidden><label class="visually-hidden" for="questions-editor">質問と選択肢のJSON</label><textarea id="questions-editor" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="soft"></textarea></div>
+            <span id="payload-size" class="payload-size"></span>
+          </details>
+        </section>
+        <section class="output-panel" aria-labelledby="output-title"><div class="panel-topline"><h3 id="output-title">3. 判断結果を比べる</h3><button class="text-button" id="export-button" disabled>結果を保存 ↓</button></div><div id="output-content" aria-live="polite" aria-busy="false"></div></section>
       </div>
-      <div class="hero-art" aria-label="入力から3種類の型付き判断を返すしくみを示す図。実行結果ではありません。">
-        <div class="art-grid"></div><span class="art-corner top-left">INPUT / OUTPUT</span><span class="art-corner bottom-right">A THINKING TOOL, NOT A CHATBOT.</span>
-        <div class="input-tile"><span class="tile-label">01 / STATE</span><strong>状況をわたす</strong><span class="mono">{ context, signals, rules }</span><div class="input-line"></div><div class="input-line short"></div></div>
-        <div class="flow-arrow" aria-hidden="true">↘</div>
-        <div class="engine-tile"><span class="engine-orbit" aria-hidden="true">✳</span><div><span class="tile-label">MICROSOFT</span><strong>Decision-1</strong></div><span class="engine-caption">決定モデル</span></div>
-        <div class="output-tiles"><div class="output-tile choice"><span>CHOICE</span><strong>ひとつ選ぶ</strong><i aria-hidden="true">↗</i></div><div class="output-tile noul"><span>NOUL</span><strong>真の度合い</strong><i aria-hidden="true">◉</i></div><div class="output-tile score"><span>SCORE</span><strong>段階で測る</strong><i aria-hidden="true">▥</i></div></div>
-      </div>
+      <details class="session-details"><summary>実行履歴・APIの詳細</summary>
+        <div class="session-bar"><div><span>試行</span><strong id="session-count">0</strong><span>成功</span><strong id="session-successes">0</strong><span>応答中央値</span><strong id="session-median">—</strong><span>報告済み料金</span><strong id="session-cost">—</strong></div><button class="text-button" id="clear-session">結果をクリア</button></div><p id="cost-note" class="session-note"></p>
+        <p class="session-note">Decision-1応答時間: <span id="hero-measurement">未計測</span></p>
+        <details class="request-details"><summary>送信するリクエスト <span>POST /api/alpha/decisions</span></summary><pre id="request-preview"></pre><p>認証ヘッダーは表示・保存しません。</p></details>
+      </details>
     </section>
-    <div class="fact-strip section-shell"><div><span class="fact-label">MODEL</span><strong>Decision-1</strong><small>via OpenRouter · alpha API</small></div><div><span class="fact-label">INPUT PRICE</span><strong>$0.042 <em>/ 1M tokens</em></strong><small>出力 $0 · API利用は有料</small></div><div><span class="fact-label">CONTEXT</span><strong>32,768 <em>tokens</em></strong><small>テキスト / JSONの状況を判断</small></div><div><span class="fact-label">MEASUREMENTS</span><strong id="hero-measurement">まだ未計測</strong><small>実行後に、この端末の応答時間を表示</small></div></div>
-    <section id="examples" class="examples-section section-shell" aria-labelledby="examples-title"><div class="section-heading"><div><div class="eyebrow">01 / EXPLORE THE POSSIBILITIES</div><h2 id="examples-title">判断が入ると、何がつくれる？</h2></div><p>気になるカードを選んで、入力を変えてみる。<br>6つの用途を、同じ実験台で比べられます。</p></div><div id="example-grid" class="example-grid"></div></section>
-    <section id="workspace" class="workspace-section section-shell" aria-labelledby="workspace-title"><div class="workspace-heading"><div><div class="eyebrow">02 / LIVE WORKBENCH</div><h2 id="workspace-title">入力を変えて、判断を確かめる。</h2></div><span class="badge neutral" id="live-status">未実行 · サンプル結果なし</span></div>
-      <div class="workbench"><div class="input-panel"><div class="panel-topline"><span class="panel-label">INPUT</span><span id="active-type" class="type-label">choice</span></div><h3 id="active-title"></h3><p id="active-description" class="panel-description"></p>
-        <div class="editor-tabs" role="tablist" aria-label="リクエストの編集"><button id="state-tab" role="tab" aria-selected="true" aria-controls="state-editor-panel" tabindex="0">入力 <span>state</span></button><button id="questions-tab" role="tab" aria-selected="false" aria-controls="questions-editor-panel" tabindex="-1">判断の定義 <span>questions</span></button></div>
-        <div id="state-editor-panel" role="tabpanel" aria-labelledby="state-tab"><label class="visually-hidden" for="state-editor">入力のJSON</label><textarea id="state-editor" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="soft"></textarea></div>
-        <div id="questions-editor-panel" role="tabpanel" aria-labelledby="questions-tab" hidden><label class="visually-hidden" for="questions-editor">質問と選択肢のJSON</label><textarea id="questions-editor" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="soft"></textarea></div>
-        <div class="editor-footer"><span id="payload-size"></span><button class="text-button" id="reset-example">入力をリセット ↺</button></div>
-        <div id="validation-error" class="error-message" role="alert" hidden></div><div class="run-row"><button id="run-button" class="primary-button" disabled><span id="run-label">この入力で実行</span><span aria-hidden="true">↗</span></button><button id="cancel-button" class="secondary-button" hidden>通信を中断</button><button id="connect-inline" class="text-button">APIキーを設定 →</button></div>
-        <p class="run-disclosure">クリックごとにOpenRouterへ入力を送信し、有料APIを1回呼びます。<br>自動実行・自動再試行・別モデルへの切り替えはありません。</p>
-      </div><div class="output-panel"><div class="panel-topline"><span class="panel-label">OUTPUT</span><button class="text-button" id="export-button" disabled>結果を保存 ↓</button></div><div id="output-content" aria-live="polite" aria-busy="false"></div></div></div>
-      <div class="session-bar"><span class="session-title"><span class="status-dot"></span> THIS TAB'S SESSION</span><div><span>試行</span><strong id="session-count">0</strong><span>成功</span><strong id="session-successes">0</strong><span>応答中央値</span><strong id="session-median">—</strong><span>応答で報告された料金</span><strong id="session-cost">—</strong></div><button class="text-button" id="clear-session">結果をクリア</button></div><p id="cost-note" class="session-note">結果とキーはこのタブのメモリだけに保持します。リロードすると消えます。</p>
-      <details class="request-details"><summary>実際に送信するリクエストを見る <span>POST /api/alpha/decisions</span></summary><pre id="request-preview"></pre><p>認証ヘッダーは表示・保存しません。入力・質問は編集内容をそのまま送信します。</p></details>
-    </section>
-    <section id="how-it-works" class="method-section section-shell" aria-labelledby="method-title"><div class="section-heading"><div><div class="eyebrow">03 / UNDER THE HOOD</div><h2 id="method-title">言葉を生成するより、判断を返す。</h2></div><p>返るのは、型付きの値と分布。<br>その先の動作は、プロダクト側で決めます。</p></div><div class="method-grid"><article><span class="method-number">01</span><h3>状況と基準を定義</h3><p>stateに状況、questionsに判断の型と選択基準を渡します。すべて編集可能です。</p></article><article><span class="method-number">02</span><h3>実APIで判断する</h3><p>ブラウザーからOpenRouterへ直接通信。推論はリモートのMicrosoft Decision-1が行います。</p></article><article><span class="method-number">03</span><h3>値を、体験につなぐ</h3><p>選択肢や確率をUIに反映。実際の送信・発注・デプロイ・ツール実行は行いません。</p></article></div>
-      <div class="honesty-note"><span aria-hidden="true">ⓘ</span><div><strong>この実験で分かること、まだ分からないこと。</strong><p>応答時間はこの端末からの通信を含む実測値です。モデル単体の推論速度や、正解率を示すものではありません。confidenceは分布の集中度であり、「正しい確率」ではありません。未実行のカードに結果は用意していません。alpha APIのため仕様・価格・提供状況は変わる可能性があります。</p></div></div>
-    </section>
+    <section class="about-section section-shell" aria-label="利用上の注意"><details><summary>このデモの仕組み・料金・注意点</summary>
+      <p>Microsoft Decision-1は、指定した候補から選ぶ・条件を満たす度合いを測る・段階で評価するモデルです。理由の文章を生成するデモではありません。</p>
+      <p>入力料金は100万トークンあたり$0.042、出力は$0（2026年10月15日確認）。APIキーと結果はこのタブのメモリだけに保持し、リロードで消えます。API利用料は各自のOpenRouterアカウントに発生します。</p>
+      <p>確率はモデルが各候補に割り当てた値で、正解率ではありません。判断を本番の自動処理につなぐ前に、用途ごとの検証が必要です。このデモでは送信・発注・デプロイなどの操作は行いません。</p>
+      <p>応答時間は通信を含む実測値です。自動実行・自動再試行・別モデルへの切り替え・疑似結果はありません。alpha APIの仕様や価格は変更される場合があります。</p>
+    </details></section>
   </main>
-  <footer class="site-footer section-shell"><div class="footer-brand">Decision Atelier<span>小さな判断から、新しい体験を。</span></div><div class="footer-links"><a href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">モデルと料金 ↗</a><a href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request" target="_blank" rel="noopener noreferrer">APIリファレンス ↗</a><span>価格確認: 2026.10.15</span></div><p>非公式の実験用PoC · Microsoft / OpenRouterとの提携を示すものではありません。</p></footer>
-  <dialog id="connection-dialog" aria-labelledby="connection-title"><div class="dialog-heading"><div><div class="eyebrow">BRING YOUR OWN KEY</div><h2 id="connection-title">このタブを、実APIにつなぐ。</h2></div><button id="close-connection" class="icon-button" aria-label="接続設定を閉じる">×</button></div><p class="dialog-intro">OpenRouterのAPIキーを使います。キーはサーバーやブラウザーの保存領域に保管せず、タブを閉じるかリロードすると消えます。</p>
+  <footer class="site-footer section-shell"><span>Decision Atelier · 非公式の実験用PoC</span><div class="footer-links"><a href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">モデル・料金 ↗</a><a href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request" target="_blank" rel="noopener noreferrer">API仕様 ↗</a></div></footer>
+  <dialog id="connection-dialog" aria-labelledby="connection-title"><div class="dialog-heading"><div><div class="eyebrow">OpenRouterのキーを使用</div><h2 id="connection-title">APIキーを設定</h2></div><button id="close-connection" class="icon-button" aria-label="接続設定を閉じる">×</button></div><p class="dialog-intro">OpenRouterのAPIキーを使います。キーはサーバーやブラウザーの保存領域に保管せず、タブを閉じるかリロードすると消えます。</p>
     <div class="price-note"><span>MICROSOFT DECISION-1</span><strong>入力 $0.042 / 100万tokens · 出力 $0</strong><p>無料枠のモデルではありません。料金は変更される場合があります。<a href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">最新料金 ↗</a></p></div>
     <form id="connection-form"><label for="api-key">OpenRouter APIキー</label><input id="api-key" type="password" name="decision-key" placeholder="sk-or-v1-…" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="512"><p class="field-note">このページでの入力はチャットには送られません。キーはOpenRouterへの認証にだけ使用します。</p><label class="checkbox-label"><input id="consent" type="checkbox"><span>実行するたびに入力内容がOpenRouterとモデル提供元に送られ、API料金がかかることを確認しました。個人情報・社外秘は入力しません。</span></label><div id="connection-error" class="error-message" role="alert" hidden></div><div class="dialog-actions"><button class="primary-button" type="submit">このタブだけで使う <span aria-hidden="true">↗</span></button><button class="secondary-button" id="remove-key" type="button" hidden>キーを破棄</button></div></form>
     <p class="security-note">キーの利用上限は<a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouterのキー設定</a>で少額にしてください。このPoCは1タブ20回・同時1件に制限しますが、請求上限を保証するものではありません。共有端末・不明なブラウザー拡張では利用を避けてください。</p>

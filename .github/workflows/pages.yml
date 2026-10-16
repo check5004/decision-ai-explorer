@@ -7,7 +7,7 @@ permissions:
   contents: read
   pages: read
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   check:
@@ -17,8 +17,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: npm run check
       - run: npm run build
+      - name: Install Chromium for isolated browser regression tests
+        run: npx playwright install --with-deps chromium
+      - name: Run TEST-ONLY-MOCK browser regressions (no paid API calls)
+        run: npm run test:browser
+      - name: Upload labeled browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEST-ONLY-MOCK-browser-evidence
+          path: test-results/
+          retention-days: 7
       - name: Docker build and runtime smoke
         run: |
           docker build -t decision-atelier:ci .
@@ -36,6 +49,7 @@ jobs:
         with:
           path: dist
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: check
     permissions:
       pages: write

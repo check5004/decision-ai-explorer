@@ -2,6 +2,15 @@
 
 Date: 2026-10-15 UTC. The tests here distinguish transport/UI validation from actual model inference.
 
+## UX revision (2026-10-16 UTC)
+
+- The six topics remain cards, with direct Japanese titles, benefits, ordinary editable fields, and a short input → decision → use explanation.
+- Result candidates are a Japanese table. Unrun rows have no percentage or color bar; returned choice probabilities receive bars and a selected-row marker. Score stays a continuous score with per-level probabilities; noul shows the returned true degree and a clearly identified complement. No model-generated rationale is invented.
+- Raw JSON, request criteria, and measurement metadata are collapsed by default. Edited input marks previous output as stale, and rerun removes previous results while waiting.
+- All 25 local syntax/unit/static-server/presentation checks passed again on 2026-10-16. The exact API transport, model ID, and fictional presets are unchanged.
+- Twelve isolated Chromium browser tests are prepared (desktop and mobile), with deny-by-default external networking and visible TEST-ONLY-MOCK watermarks. Local launch was blocked before page load by executor socket restrictions; the supported escalated execution path also failed before launching. This is not a passed or failed application interaction test. The revision will be tested on a non-deploying CI branch before promotion to main.
+- Authenticated inference remains unverified: no real API key has been supplied and no inference request was made.
+
 ## Passed locally
 
 - Node.js v24.19.0 syntax checks.
