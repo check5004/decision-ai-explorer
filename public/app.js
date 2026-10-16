@@ -1,6 +1,6 @@
 import { EXAMPLES } from './examples.js';
 import { PRESENTATION, getQuestionRows } from './presentation.js';
-import { MODEL, LIMITS } from './model.js';
+import { MODEL, MODELS, getModel, LIMITS } from './model.js';
 import { KEY_STORAGE_NAME, isApiKey, readSavedKey, saveKey, deleteSavedKey } from './credentials.js';
 import { buildRequest, requestDecision, summarizeRuns } from './core.js';
 
@@ -12,9 +12,20 @@ if (window.self !== window.top) {
 const $ = id => document.getElementById(id);
 const pretty = value => JSON.stringify(value, null, 2);
 const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-const records = new Map(EXAMPLES.map(example => [example.id, { state: pretty(example.state), questions: pretty(example.questions), result: null, error: null, request: null }]));
+const inputs = new Map(EXAMPLES.map(example => [example.id, { state: pretty(example.state), questions: pretty(example.questions) }]));
+function createRecord(exampleId) {
+  const input = inputs.get(exampleId);
+  return { get state() { return input.state; }, set state(value) { input.state = value; },
+    get questions() { return input.questions; }, set questions(value) { input.questions = value; },
+    result: null, error: null, request: null, pending: false };
+}
+const records = new Map(EXAMPLES.map(example => [example.id, new Map(MODELS.map(model => [model.id, createRecord(example.id)]))]));
+const comparisons = new Map();
 const history = [];
 let currentId = EXAMPLES[0].id;
+let selectedModelId = MODEL.id;
+let viewMode = 'single';
+let activeRunId = 0;
 let apiKey = '';
 let keyStorageIssue = false;
 let activeController = null;
@@ -23,7 +34,8 @@ let lastAttemptAt = -Infinity;
 let sessionAttempts = 0;
 let cooldownTimer;
 let requestIsValid = true;
-const currentRecord = () => records.get(currentId);
+const currentRecord = () => records.get(currentId).get(selectedModelId);
+const currentModel = () => getModel(selectedModelId);
 const currentExample = () => EXAMPLES.find(x => x.id === currentId);
 const currentCopy = () => PRESENTATION[currentId];
 function setBadge(text, kind = 'neutral') { $('live-status').textContent = text; $('live-status').className = `badge ${kind}`; }
@@ -53,7 +65,7 @@ function selectTab(tab) {
 function refreshRequest({ reportError = false } = {}) {
   const record = currentRecord();
   try {
-    const request = buildRequest(record.state, record.questions);
+    const request = buildRequest(record.state, record.questions, selectedModelId);
     $('request-preview').textContent = pretty(request); $('payload-size').textContent = `${new TextEncoder().encode(JSON.stringify(request)).byteLength.toLocaleString()} / ${LIMITS.maxPayloadBytes.toLocaleString()} bytes`;
     requestIsValid = true; showValidation('');
   } catch (error) { requestIsValid = false; $('payload-size').textContent = 'JSON・判断基準を確認してください'; $('request-preview').textContent = `送信できません: ${error.message}`; if (reportError) showValidation(error.message); }
@@ -93,7 +105,8 @@ function renderFriendlyFields() {
   if (custom) root.append(el('p', 'custom-fields-note', `追加・複雑な項目が${custom}件あります。値は保持しています。編集するには詳細設定を開いてください。`));
 }
 
-function renderSelected() {
+function renderSelected(mode = 'auto') {
+  viewMode = mode === 'auto' ? comparisons.has(currentId) ? 'compare' : 'single' : mode;
   const copy = currentCopy(); const record = currentRecord();
   $('workspace-title').textContent = copy.title; $('active-benefit').textContent = copy.benefit;
   const flow = $('scenario-flow'); flow.replaceChildren();
@@ -102,16 +115,34 @@ function renderSelected() {
   $('advanced-settings').open = false; selectTab('state'); showValidation(''); renderFriendlyFields(); refreshRequest(); renderGallery(); renderOutput();
 }
 
+function renderModelDetails() {
+  const model = currentModel();
+  $('model-select').value = model.id;
+  $('model-info').textContent = '入力 $' + model.inputPerMillion + ' / 100万トークン・出力 $' + model.outputPerMillion + '・コンテキスト ' + model.context.toLocaleString() + 'トークン（' + model.checkedAt + '確認）';
+  $('model-reference').href = model.reference;
+  $('connection-model-name').textContent = model.name;
+  $('connection-model-price').textContent = '入力 $' + model.inputPerMillion + ' / 100万トークン · 出力 $' + model.outputPerMillion;
+  $('connection-model-reference').href = model.reference;
+  $('model-footer-reference').href = model.reference;
+  $('comparison-targets').textContent = MODELS.map(model => model.name).join(' / ');
+}
 function updateControls() {
   const cooldown = Date.now() - lastAttemptAt < LIMITS.cooldownMs;
   $('run-button').disabled = !apiKey || running || !requestIsValid || cooldown || sessionAttempts >= LIMITS.maxRuns;
-  $('run-label').textContent = running ? '判断中…' : sessionAttempts >= LIMITS.maxRuns ? 'このタブの20回上限に到達' : currentRecord().result ? 'この条件でもう一度判断' : 'この条件で判断する';
+  $('run-label').textContent = running ? '判断中…' : sessionAttempts >= LIMITS.maxRuns ? 'このタブの20回上限に到達' : '選択モデルだけ実行';
+  $('compare-button').disabled = !apiKey || running || !requestIsValid || cooldown || sessionAttempts + MODELS.length > LIMITS.maxRuns;
+  $('compare-label').textContent = running ? '判断中…' : `${MODELS.length}モデルを同時に比較`;
+  $('model-select').disabled = running;
+  $('view-comparison').hidden = !comparisons.has(currentId) || viewMode === 'compare';
+  $('view-comparison').disabled = running;
+  $('remaining-requests').textContent = `このタブの残り ${LIMITS.maxRuns - sessionAttempts}リクエスト。比較1回で${MODELS.length}件、単体実行で1件使います。`;
   $('cancel-button').hidden = !running; $('connect-inline').hidden = !!apiKey || running;
   $('connection-label').textContent = apiKey ? 'キー保存済み' : 'APIキーを設定'; $('connection-dot').className = `status-dot${apiKey ? ' connected' : ''}`;
   $('remove-key').hidden = !apiKey && !keyStorageIssue; $('open-connection').disabled = running;
   $('state-editor').disabled = running; $('questions-editor').disabled = running; $('reset-example').disabled = running; $('clear-session').disabled = running;
   for (const input of $('friendly-fields').querySelectorAll('[data-state-key]')) input.disabled = running;
-  $('export-button').disabled = running || !(currentRecord().result || currentRecord().error); $('output-content').setAttribute('aria-busy', String(running));
+  $('export-button').disabled = running || (viewMode === 'compare' ? !comparisons.get(currentId)?.entries.size : !(currentRecord().result || currentRecord().error));
+  $('export-button').textContent = viewMode === 'compare' ? '比較結果を保存 ↓' : '結果を保存 ↓'; $('output-content').setAttribute('aria-busy', String(running));
 }
 
 function makeResultTable(question, rows, { answered = false } = {}) {
@@ -178,56 +209,127 @@ function makeMetrics(timing, data = null) {
 }
 function rawDetails(title, data) { const details = el('details', 'raw-details'); details.append(el('summary', '', title), el('pre', '', typeof data === 'string' ? data : pretty(data))); return details; }
 
-function renderOutput() {
-  const record = currentRecord(); const root = el('div');
-  if (record.result || record.error) {
-    if (record.sentState !== record.state || record.sentQuestions !== record.questions) root.append(el('p', 'result-stale', '前回の入力に対する結果です。入力変更後の条件は未実行です。'));
+function renderRecord(root, record, { preview = true } = {}) {
+  if ((record.result || record.error) && (record.sentState !== record.state || record.sentQuestions !== record.questions)) {
+    root.append(el('p', 'result-stale', '前回の入力に対する結果です。入力変更後の条件は未実行です。'));
   }
-  if (running) { setBadge('判断中', 'busy'); const busy = el('div', 'busy-note'); busy.append(el('span', 'spinner'), el('span', '', '実際のAPIに問い合わせています。')); root.append(busy); }
-  else if (record.error) { setBadge('取得に失敗', 'error'); const error = el('div', 'error-result'); error.append(el('h4', '', '結果を取得できませんでした'), el('p', '', record.error.message)); root.append(error); }
-  else if (!record.result) { setBadge('未実行'); const note = el('div', 'pending-note'); note.append(el('strong', '', '実行すると、ここに結果が表示されます。'), el('span', '', '下の表は候補と意味の確認用です。割合はまだ計測していません。')); root.append(note); }
+  if (record.pending) {
+    const busy = el('div', 'busy-note'); busy.append(el('span', 'spinner'), el('span', '', 'APIの応答を待っています。')); root.append(busy);
+  } else if (record.error) {
+    const error = el('div', 'error-result'); error.append(el('h4', '', '結果を取得できませんでした'), el('p', '', record.error.message)); root.append(error);
+  } else if (!record.result) {
+    const note = el('div', 'pending-note'); note.append(el('strong', '', '実行すると、ここに結果が表示されます。'), el('span', '', '下の表は候補と意味の確認用です。割合はまだ計測していません。')); root.append(note);
+  }
   if (record.result) {
     const { data, timing, receivedAt, identity } = record.result;
-    const isStale = record.sentState !== record.state || record.sentQuestions !== record.questions;
-    setBadge(!identity.verified ? '結果あり・モデルID要確認' : isStale ? '前回の結果・入力変更あり' : '実APIの結果', !identity.verified || isStale ? 'neutral' : 'success');
-    if (!identity.verified) root.append(el('p', 'result-stale', `返却モデルID「${data.model}」は、このアプリで確認済みのIDに含まれていません。要求したモデルと同一か確認できないため、速度の集計から除外しています。`));
+    if (!identity.verified) root.append(el('p', 'result-stale', `返却モデルID「${data.model}」は、要求したモデルで確認済みのIDに含まれていません。速度の集計から除外しています。`));
     renderQuestionResults(root, record.request, data.answers); root.append(makeMetrics(timing, data));
-    const meta = { requested_model: MODEL.id, returned_model: data.model, model_identity: identity, provider: data.provider ?? '未報告', id: data.id ?? '未報告', tokens: data.usage ?? '未報告', received_at: receivedAt, response_headers_ms: timing.headersMs, timing_note: 'ヘッダー到着は最初のトークンの時間ではありません。', confidence: Object.fromEntries(Object.entries(data.answers).filter(([, a]) => a.confidence !== undefined).map(([id, a]) => [id, a.confidence])), confidence_note: 'confidenceは分布の集中度です。正解率ではありません。' };
+    const meta = { requested_model: record.request.model, returned_model: data.model, model_identity: identity, provider: data.provider ?? '未報告', id: data.id ?? '未報告', tokens: data.usage ?? '未報告', received_at: receivedAt, response_headers_ms: timing.headersMs, timing_note: record.comparisonId ? '比較全体の共通開始時刻から受信・解析まで。ヘッダー到着は最初のトークンの時間ではありません。' : '送信開始から受信・解析まで。ヘッダー到着は最初のトークンの時間ではありません。', confidence: Object.fromEntries(Object.entries(data.answers).filter(([, a]) => a.confidence !== undefined).map(([id, a]) => [id, a.confidence])), confidence_note: 'confidenceは分布の集中度です。正解率ではありません。' };
     root.append(rawDetails('モデル・計測の詳細', meta), rawDetails('APIの生の応答（JSON）', data), rawDetails('この結果の入力・判断基準（JSON）', record.request));
   } else {
-    try { renderQuestionResults(root, buildRequest(record.state, record.questions)); }
-    catch { root.append(el('p', 'pending-note', '入力または判断基準に問題があります。修正すると候補を表示できます。')); }
-    if (record.error) { if (record.error.timing) root.append(makeMetrics(record.error.timing, record.error.body)); if (record.error.body != null) root.append(rawDetails('エラー応答の詳細', record.error.body)); }
+    if (preview) {
+      try { renderQuestionResults(root, record.request || buildRequest(record.state, record.questions, selectedModelId)); }
+      catch { root.append(el('p', 'pending-note', '入力または判断基準に問題があります。修正すると候補を表示できます。')); }
+    }
+    if (record.error) {
+      if (record.error.timing) root.append(makeMetrics(record.error.timing, record.error.body));
+      if (record.error.body != null) root.append(rawDetails('エラー応答の詳細', record.error.body));
+    }
+  }
+}
+function renderOutput() {
+  const root = el('div');
+  const comparison = viewMode === 'compare' ? comparisons.get(currentId) : null;
+  $('workbench').dataset.mode = comparison ? 'compare' : 'single';
+  $('output-title').textContent = comparison ? '3. モデルごとの結果を比べる' : `3. ${currentModel().name} の判断結果`;
+  if (comparison) {
+    const finished = [...comparison.entries.values()].filter(record => !record.pending).length;
+    const successes = [...comparison.entries.values()].filter(record => record.result).length;
+    setBadge(running ? `比較中 ${finished}/${MODELS.length}` : `比較完了・${successes}/${MODELS.length}件取得`, running ? 'busy' : successes === MODELS.length ? 'success' : 'neutral');
+    root.append(el('p', 'comparison-note', '同じ入力を同時に送信しています。所要時間は共通の比較開始から受信・解析までの通信込みです。モデル単体の推論速度ではありません。'));
+    const grid = el('div', 'comparison-grid');
+    for (const model of MODELS) {
+      const record = comparison.entries.get(model.id);
+      const card = el('section', 'model-result'); card.dataset.modelId = model.id;
+      const heading = el('div', 'model-result-heading'); heading.append(el('h4', '', model.name));
+      heading.append(el('span', 'model-result-status', record.pending ? '判断中' : record.error ? '取得に失敗' : record.result?.identity.verified ? '実APIの結果' : 'モデルID要確認'));
+      card.append(heading); renderRecord(card, record, { preview: false }); grid.append(card);
+    }
+    root.append(grid);
+  } else {
+    const record = currentRecord();
+    const stale = record.result && (record.sentState !== record.state || record.sentQuestions !== record.questions);
+    setBadge(record.pending ? '判断中' : record.error ? '取得に失敗' : record.result ? !record.result.identity.verified ? '結果あり・モデルID要確認' : stale ? '前回の結果・入力変更あり' : '実APIの結果' : '未実行', record.pending ? 'busy' : record.error ? 'error' : record.result?.identity.verified && !stale ? 'success' : 'neutral');
+    renderRecord(root, record);
   }
   $('output-content').replaceChildren(root); updateControls();
 }
 function renderSession() {
-  const stats = summarizeRuns(history); $('session-count').textContent = String(sessionAttempts); $('session-successes').textContent = String(stats.successes);
-  $('session-median').textContent = formatMs(stats.medianMs); $('session-cost').textContent = history.length && stats.missingCosts !== history.length ? formatMoney(stats.reportedCost) : '—';
+  const stats = summarizeRuns(history, selectedModelId);
+  $('session-count').textContent = String(sessionAttempts); $('session-successes').textContent = String(stats.successes);
+  $('session-median').textContent = formatMs(stats.medianMs);
+  $('session-cost').textContent = stats.attempts && stats.missingCosts !== stats.attempts ? formatMoney(stats.reportedCost) : '—';
   $('hero-measurement').textContent = stats.medianMs !== null ? `${formatMs(stats.medianMs)} / n=${stats.successes - stats.unverifiedModels}` : stats.unverifiedModels ? '返却モデルIDを確認' : '未計測';
-  $('cost-note').textContent = stats.missingCosts ? `料金未報告の試行が${stats.missingCosts}件あります。表示料金は合計請求額ではありません。中断・エラーでも課金される場合があります。` : '料金は応答のusage.costの合計です。結果と実行履歴はリロードで消えます。保存したキーはこのブラウザーに残ります。';
-}
-async function run() {
-  if (running || !apiKey || sessionAttempts >= LIMITS.maxRuns || Date.now() - lastAttemptAt < LIMITS.cooldownMs) return;
-  const record = currentRecord(); let request;
-  try { request = buildRequest(record.state, record.questions); } catch (error) { showValidation(error.message); return; }
-  running = true; sessionAttempts++; lastAttemptAt = Date.now(); showValidation('');
-  const controller = new AbortController(); activeController = controller; const requestKey = apiKey;
-  const timeout = setTimeout(() => controller.abort('timeout'), LIMITS.timeoutMs);
-  record.request = request; record.sentState = record.state; record.sentQuestions = record.questions; record.error = null; record.result = null;
-  updateControls(); renderGallery(); renderOutput(); renderSession();
-  try {
-    record.result = await requestDecision({ request, key: requestKey, signal: controller.signal });
-    history.push({ result: record.result });
-  } catch (error) {
-    record.error = { message: error.message, status: error.status ?? null, body: error.body ?? null, timing: error.timing ?? null };
-    history.push({ error: record.error });
-    if (error.status === 401 || error.status === 403) removeRejectedKey(requestKey);
-  } finally {
-    clearTimeout(timeout); running = false; activeController = null;
-    renderOutput(); renderGallery(); renderSession(); updateControls();
-    clearTimeout(cooldownTimer); cooldownTimer = setTimeout(updateControls, Math.max(0, LIMITS.cooldownMs - (Date.now() - lastAttemptAt)) + 20);
+  $('session-model-name').textContent = currentModel().name;
+  $('cost-note').textContent = stats.missingCosts ? `このモデルで料金未報告の試行が${stats.missingCosts}件あります。表示料金は報告済み部分の合計です。中断・エラーでも課金される場合があります。` : '料金はこのモデルの応答で報告されたusage.costの合計です。結果と履歴はリロードで消えます。保存したキーはこのブラウザーに残ります。';
+  const summary = $('model-summary-body'); summary.replaceChildren();
+  for (const model of MODELS) {
+    const s = summarizeRuns(history, model.id); const row = el('tr'); row.dataset.modelId = model.id;
+    row.append(el('th', '', model.name), el('td', '', `${s.attempts} / ${s.successes}`), el('td', '', formatMs(s.medianMs)), el('td', '', String(s.successes - s.unverifiedModels)), el('td', '', s.attempts && s.missingCosts !== s.attempts ? formatMoney(s.reportedCost) + (s.missingCosts ? '（一部未報告）' : '') : '未報告'));
+    summary.append(row);
   }
+  const list = $('run-history'); list.replaceChildren();
+  for (const item of [...history].reverse()) {
+    const line = el('li'); line.dataset.modelId = item.request.model;
+    line.append(el('strong', '', `${getModel(item.request.model).name} / ${PRESENTATION[item.exampleId].title}`));
+    line.append(el('span', '', item.result ? `取得成功・${formatMs(item.result.timing.totalMs)}・${formatMoney(item.result.data.usage?.cost)}${item.result.identity.verified ? '' : '（モデルID未確認・速度集計対象外）'}` : `取得失敗・${item.error.message}・料金 ${formatMoney(item.error.body?.usage?.cost)}`));
+    list.append(line);
+  }
+}
+async function run(modelIds = [selectedModelId]) {
+  if (running || !apiKey || sessionAttempts + modelIds.length > LIMITS.maxRuns || Date.now() - lastAttemptAt < LIMITS.cooldownMs) return;
+  const exampleId = currentId; const state = currentRecord().state; const questions = currentRecord().questions;
+  let requests;
+  try { requests = modelIds.map(id => buildRequest(state, questions, id)); }
+  catch (error) { showValidation(error.message); return; }
+  const runId = ++activeRunId; const isComparison = requests.length > 1; const requestKey = apiKey;
+  const controller = new AbortController(); activeController = controller;
+  const entries = new Map();
+  for (const request of requests) {
+    const record = createRecord(exampleId);
+    Object.assign(record, { request, sentState: state, sentQuestions: questions, pending: true, comparisonId: isComparison ? runId : null });
+    records.get(exampleId).set(request.model, record); entries.set(request.model, record);
+  }
+  if (isComparison) comparisons.set(exampleId, { id: runId, entries, state, questions });
+  viewMode = isComparison ? 'compare' : 'single';
+  running = true; sessionAttempts += requests.length; lastAttemptAt = Date.now(); showValidation('');
+  updateControls(); renderGallery(); renderOutput(); renderSession();
+  const startedAt = performance.now();
+  await Promise.allSettled(requests.map(async request => {
+    const record = entries.get(request.model); const perRequest = new AbortController();
+    const abort = () => perRequest.abort(controller.signal.reason);
+    controller.signal.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(() => perRequest.abort('timeout'), LIMITS.timeoutMs);
+    try {
+      const result = await requestDecision({ request, key: requestKey, signal: perRequest.signal, startedAt });
+      if (perRequest.signal.aborted) throw Object.assign(new Error('通信を中断しました。サーバー側で完了した分は課金される場合があります。'), { timing: result.timing, body: { usage: result.data.usage } });
+      if (runId !== activeRunId) return;
+      record.result = result;
+      history.push({ request, exampleId, comparisonId: record.comparisonId, result });
+    } catch (error) {
+      if (runId !== activeRunId) return;
+      record.error = { message: error.message, status: error.status ?? null, body: error.body ?? null, timing: error.timing ?? null };
+      history.push({ request, exampleId, comparisonId: record.comparisonId, error: record.error });
+      if (error.status === 401) removeRejectedKey(requestKey);
+    } finally {
+      clearTimeout(timeout); controller.signal.removeEventListener('abort', abort); record.pending = false;
+      if (runId === activeRunId) { renderOutput(); renderSession(); }
+    }
+  }));
+  if (runId !== activeRunId) return;
+  running = false; activeController = null;
+  renderOutput(); renderGallery(); renderSession(); updateControls();
+  clearTimeout(cooldownTimer); cooldownTimer = setTimeout(updateControls, Math.max(0, LIMITS.cooldownMs - (Date.now() - lastAttemptAt)) + 20);
 }
 
 function keyNotice(message, issue = false) {
@@ -292,20 +394,30 @@ for (const name of ['state', 'questions']) {
   $(`${name}-tab`).addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'state' : event.key === 'End' ? 'questions' : name === 'state' ? 'questions' : 'state'; selectTab(next); $(`${next}-tab`).focus(); } });
   $(`${name}-editor`).addEventListener('input', () => { currentRecord()[name] = $(`${name}-editor`).value; if (name === 'state') renderFriendlyFields(); refreshRequest({ reportError: true }); renderOutput(); });
 }
-$('run-button').addEventListener('click', run);
+$('run-button').addEventListener('click', () => run([selectedModelId]));
+$('compare-button').addEventListener('click', () => run(MODELS.map(model => model.id)));
+$('view-comparison').addEventListener('click', () => { if (!running && comparisons.has(currentId)) { viewMode = 'compare'; renderOutput(); } });
+$('model-select').addEventListener('change', () => {
+  if (running || !getModel($('model-select').value)) { $('model-select').value = selectedModelId; return; }
+  selectedModelId = $('model-select').value; renderModelDetails(); renderSelected('single'); renderSession();
+});
 $('cancel-button').addEventListener('click', () => activeController?.abort('user'));
 $('reset-example').addEventListener('click', () => {
   if (running) return; const example = currentExample(); const record = currentRecord(); record.state = pretty(example.state); record.questions = pretty(example.questions); renderSelected();
 });
 $('clear-session').addEventListener('click', () => {
   if (running) return;
-  for (const record of records.values()) { record.result = null; record.error = null; record.request = null; delete record.sentState; delete record.sentQuestions; }
-  history.length = 0; renderOutput(); renderGallery(); renderSession();
+  for (const byModel of records.values()) for (const record of byModel.values()) { record.result = null; record.error = null; record.request = null; delete record.sentState; delete record.sentQuestions; }
+  history.length = 0; comparisons.clear(); viewMode = 'single'; renderOutput(); renderGallery(); renderSession();
   $('cost-note').textContent = '結果を消去しました。通信の試行回数と20回の上限は維持します。OpenRouterの利用明細や請求は変わりません。';
 });
 $('export-button').addEventListener('click', () => {
-  const record = currentRecord(); if (!record.result && !record.error) return;
-  const report = { identity: record.result?.identity ?? null, title: 'Decision Atelier — actual API run', example: currentId, request: record.request, response: record.result?.data ?? null, timing: record.result?.timing ?? record.error?.timing ?? null, receivedAt: record.result?.receivedAt ?? null, error: record.error, measurement_note: 'Total round-trip including network, routing, provider, reading and parsing; headers are not first-token time.' };
+  const comparison = viewMode === 'compare' ? comparisons.get(currentId) : null;
+  const toReport = record => ({ identity: record.result?.identity ?? null, request: record.request, response: record.result?.data ?? null, timing: record.result?.timing ?? record.error?.timing ?? null, receivedAt: record.result?.receivedAt ?? null, error: record.error });
+  const record = currentRecord(); if (!comparison && !record.result && !record.error) return;
+  const report = { title: 'Decision Atelier — actual API run', example: currentId,
+    ...(comparison ? { comparison: [...comparison.entries].map(([model, entry]) => ({ model, ...toReport(entry) })) } : toReport(record)),
+    measurement_note: comparison ? 'Shared comparison start through each response read/parse, including network/routing/provider. Not pure inference time.' : 'Total round-trip including network/routing/provider/read/parse. Headers are not first-token time.' };
   const url = URL.createObjectURL(new Blob([pretty(report)], { type: 'application/json' })); const link = el('a'); link.href = url; link.download = `decision-${currentId}-${Date.now()}.json`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 window.addEventListener('pagehide', () => { activeController?.abort('pagehide'); apiKey = ''; $('api-key').value = ''; });
@@ -315,4 +427,5 @@ window.addEventListener('storage', event => {
     activeController?.abort('key-changed'); restoreKey(); updateControls();
   }
 });
-restoreKey(); renderSelected(); renderSession();
+for (const model of MODELS) { const option = el('option', '', model.name); option.value = model.id; $('model-select').append(option); }
+restoreKey(); renderModelDetails(); renderSelected(); renderSession();

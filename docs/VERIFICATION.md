@@ -2,6 +2,15 @@
 
 Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here distinguish transport/UI validation from actual model inference.
 
+## Five-model selection and parallel comparison (2026-10-16 UTC)
+
+- Official catalog and model-page review confirms Microsoft Decision 1, TypeSafe Jev 1.14, Perplexity Decider V1.1, Liquid d1 and Mercury Decide Free share the text/JSON choice/noul/score contract. Exact IDs, canonical mappings, price snapshot and sources are listed in README and the static registry. Mutable latest aliases and unsupported special types are excluded.
+- A main Compare button sends the same input snapshot to all five models concurrently; single-model Run remains. Targets and request count are visible before clicking, without an extra execution confirmation dialog.
+- Each model completes independently. Results, actual returned costs, unknown-ID warnings and errors render per model. Missing cost remains unknown. Model-specific summaries/history use the captured request ID and validate the response against that model's mapping.
+- Common comparison-start timing includes network/routing/provider/read/parse and browser scheduling; it is not isolated model inference time.
+- Tests are added for exact IDs/free route, cross-model isolation, parallel dispatch before completion, immutable snapshots, disabled changes/double clicks, partial failures, missing costs, unknown response IDs, cancel/rerun stale-response protection, 20-request accounting after clear, timeout, exports and desktop/mobile layout. A model-specific 403 preserves the saved key for permitted models; only 401 invokes the rejected-key deletion path.
+- Syntax parsing and DOM-ID checks passed in the tool JavaScript runtime. Full Node/browser/Docker checks and independent review are pending the dedicated review branch. No authenticated inference, real credential or paid API call is used. The cloud browser/shell remain unavailable; new screenshot evidence will not be described as manually reviewed.
+
 ## Browser key persistence (2026-10-16 UTC)
 
 - At the user's request, explicit Save now persists their own UI-entered key in one app-specific localStorage entry. Reload restores it without making a request; result/history persistence is unchanged. The password field is cleared and never repopulated with the saved value.

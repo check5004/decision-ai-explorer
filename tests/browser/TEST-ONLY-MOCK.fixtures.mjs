@@ -1,5 +1,5 @@
 import { test as base, expect } from '@playwright/test';
-import { MODEL } from '../../public/model.js';
+import { MODEL, getModel } from '../../public/model.js';
 
 // Deliberately synthetic, non-working credential. No environment key is read.
 export const TEST_ONLY_MOCK_KEY = 'sk-or-v1-TEST_ONLY_MOCK_NOT_A_REAL_KEY';
@@ -56,14 +56,15 @@ export const test = base.extend({
         violations.push('Blocked API request without the expected synthetic credential and POST method.');
         return route.abort('blockedbyclient');
       }
-      const response = queued.shift();
+      const body = request.postDataJSON();
+      if (!getModel(body.model)) { violations.push('Unregistered model request.'); return route.abort('blockedbyclient'); }
+      const responseIndex = queued.findIndex(item => item.requestModel === body.model);
+      const response = responseIndex < 0 ? null : queued.splice(responseIndex, 1)[0];
       if (!response) {
         violations.push('Blocked API request without a queued TEST-ONLY-MOCK response.');
         return route.abort('blockedbyclient');
       }
-      const body = request.postDataJSON();
       requests.push(body);
-      if (body.model !== MODEL.id) violations.push(`Unexpected requested model: ${body.model}`);
       await response.gate;
       return route.fulfill({
         status: response.status,
@@ -74,11 +75,11 @@ export const test = base.extend({
     });
     const api = {
       requests,
-      queue(body, { status = 200, hold = false } = {}) {
+      queue(body, { status = 200, hold = false, requestModel = MODEL.id } = {}) {
         let release = () => {};
         const gate = hold ? new Promise(resolve => { release = resolve; }) : Promise.resolve();
         pendingReleases.push(release);
-        queued.push({ body, status, gate });
+        queued.push({ body, status, gate, requestModel });
         return release;
       },
     };

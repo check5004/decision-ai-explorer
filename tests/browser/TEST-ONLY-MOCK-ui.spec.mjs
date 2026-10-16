@@ -1,3 +1,4 @@
+import { MODELS } from '../../public/model.js';
 import { KEY_STORAGE_NAME } from '../../public/credentials.js';
 import { EXAMPLES } from '../../public/examples.js';
 import { PRESENTATION } from '../../public/presentation.js';
@@ -380,4 +381,150 @@ test('TEST-ONLY-MOCK an old authentication rejection cannot delete a newer saved
   await expect(page.locator('#run-button')).toBeEnabled();
   await expect(page.locator('body')).not.toContainText(newerKey);
   expect(mockNetwork.requests).toHaveLength(1);
+});
+
+const modelCard = (page, id) => page.locator('.model-result').filter({ has: page.locator('.model-result-heading h4', { hasText: MODELS.find(model => model.id === id).name }) });
+function queueComparison(mockNetwork, { hold = false, failed = null, failedStatus = 429, missingCost = null, unknown = null, billing = false } = {}) {
+  return MODELS.map(model => {
+    const body = billing ? choiceResponse('billing_support', { technical_support: .1, billing_support: .8, product_guidance: .1 }) : choiceResponse();
+    body.model = model.id === unknown ? model.canonicalId + '-unrecognized' : model.canonicalId;
+    if (model.id === missingCost) delete body.usage.cost;
+    return mockNetwork.queue(model.id === failed ? { error: { code: failedStatus, message: 'TEST-ONLY-MOCK synthetic model failure' } } : body, { requestModel: model.id, hold, status: model.id === failed ? failedStatus : 200 });
+  });
+}
+
+test('TEST-ONLY-MOCK model selection uses the documented ID and keeps inputs, outputs and stats separated', async ({ page, mockNetwork }) => {
+  await openApp(page);
+  await expect(page.locator('#model-select option')).toHaveCount(5);
+  await expect(page.locator('#compare-button')).toBeDisabled();
+  await runFixture(page, mockNetwork, choiceResponse());
+  await page.getByRole('spinbutton', { name: '現在のメンバー数', exact: true }).fill('8');
+  const jev = MODELS.find(model => model.id === 'typesafe/jev-1.14');
+  await page.locator('#model-select').selectOption(jev.id);
+  await expect(page.getByRole('spinbutton', { name: '現在のメンバー数', exact: true })).toHaveValue('8');
+  await expect(page.locator('#live-status')).toHaveText('未実行');
+  await expect(page.locator('#session-median')).toHaveText('—');
+  await expect(page.locator('.selected-result-row')).toHaveCount(0);
+  const body = choiceResponse('billing_support', { technical_support: .1, billing_support: .8, product_guidance: .1 }); body.model = jev.canonicalId;
+  mockNetwork.queue(body, { requestModel: jev.id });
+  await expect(page.locator('#run-button')).toBeEnabled(); await page.locator('#run-button').click();
+  await expect(page.locator('#live-status')).toHaveText('実APIの結果');
+  await expect(page.locator('.selected-result-row')).toContainText('請求サポート');
+  expect(mockNetwork.requests[1].model).toBe(jev.id);
+  expect(mockNetwork.requests[1].state.members).toBe(8);
+  await page.locator('#model-select').selectOption(MODELS[0].id);
+  await expect(page.locator('.selected-result-row')).toContainText('技術サポート');
+  await expect(page.locator('.result-stale')).toContainText('前回の入力');
+  await expect(page.locator('#model-summary-body tr').filter({ hasText: 'Microsoft Decision 1' })).toContainText('1 / 1');
+  await expect(page.locator('#model-summary-body tr').filter({ hasText: 'Jev 1.14' })).toContainText('1 / 1');
+  expect(mockNetwork.requests).toHaveLength(2);
+});
+
+test('TEST-ONLY-MOCK comparison starts all five requests before any finish, uses one snapshot and locks changes', async ({ page, mockNetwork }, testInfo) => {
+  await openApp(page); const releases = queueComparison(mockNetwork, { hold: true }); await connectMockKey(page);
+  await page.locator('#compare-button').click();
+  await expect.poll(() => mockNetwork.requests.length).toBe(5);
+  const snapshot = mockNetwork.requests[0];
+  expect(new Set(mockNetwork.requests.map(request => request.model)).size).toBe(5);
+  for (const request of mockNetwork.requests) { expect(request.state).toEqual(snapshot.state); expect(request.questions).toEqual(snapshot.questions); }
+  await expect(page.locator('#model-select')).toBeDisabled();
+  await expect(page.locator('#run-button')).toBeDisabled(); await expect(page.locator('#compare-button')).toBeDisabled();
+  await page.evaluate(() => { document.querySelector('#compare-button').click(); const selector = document.querySelector('#model-select'); selector.value = 'typesafe/jev-1.14'; selector.dispatchEvent(new Event('change')); });
+  await expect(page.locator('#model-select')).toHaveValue(MODELS[0].id);
+  expect(mockNetwork.requests).toHaveLength(5);
+  releases.slice(0, 4).forEach(release => release());
+  await expect(page.locator('.model-result-status', { hasText: '実APIの結果' })).toHaveCount(4);
+  await expect(page.locator('.model-result-status', { hasText: '判断中' })).toHaveCount(1);
+  releases[4]();
+  await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.model-result')).toHaveCount(5);
+  await expect(page.locator('.model-result .selected-result-row')).toHaveCount(5);
+  await expect(page.locator('#session-count')).toHaveText('5');
+  for (const model of MODELS) await expect(modelCard(page, model.id).locator('.selected-result-row .result-percent')).toHaveText('80.0%');
+  const cards = await page.locator('.model-result').evaluateAll(nodes => nodes.slice(0, 2).map(node => ({ x: node.getBoundingClientRect().x, y: node.getBoundingClientRect().y })));
+  expect(cards[1].x).toBeGreaterThan(cards[0].x); expect(Math.abs(cards[1].y - cards[0].y)).toBeLessThan(2);
+  const downloadPromise = page.waitForEvent('download'); await page.locator('#export-button').click();
+  const stream = await (await downloadPromise).createReadStream(); let json = ''; for await (const chunk of stream) json += chunk.toString();
+  const exported = JSON.parse(json);
+  expect(exported.comparison).toHaveLength(5); expect(json).not.toContain(TEST_ONLY_MOCK_KEY);
+  for (const item of exported.comparison) { expect(item.request.model).toBe(item.model); expect(item.timing.totalMs).toBeGreaterThanOrEqual(0); }
+  await saveMockScreenshot(page, testInfo, 'five-model-comparison-desktop');
+});
+
+test('TEST-ONLY-MOCK partial failure, missing cost and unknown ID remain independent in comparison', async ({ page, mockNetwork }, testInfo) => {
+  await openApp(page);
+  queueComparison(mockNetwork, { failed: MODELS[1].id, missingCost: MODELS[3].id, unknown: MODELS[4].id });
+  await connectMockKey(page); await page.locator('#compare-button').click(); await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(modelCard(page, MODELS[1].id)).toContainText('HTTP 429');
+  await expect(modelCard(page, MODELS[1].id).locator('.selected-result-row')).toHaveCount(0);
+  await expect(modelCard(page, MODELS[0].id).locator('.selected-result-row')).toHaveCount(1);
+  await expect(modelCard(page, MODELS[3].id).locator('.metric').nth(1)).toContainText('未報告');
+  await expect(modelCard(page, MODELS[4].id)).toContainText('速度の集計から除外');
+  await expect(page.locator('#model-summary-body tr').filter({ hasText: MODELS[4].name }).locator('td').nth(1)).toHaveText('—');
+  await expect(page.locator('#model-summary-body tr').filter({ hasText: MODELS[1].name })).toContainText('1 / 0');
+  expect(mockNetwork.requests).toHaveLength(5);
+  await saveMockScreenshot(page, testInfo, 'five-model-partial-failure');
+});
+
+test('TEST-ONLY-MOCK cancellation and rerun cannot mix old comparison responses into new results', async ({ page, mockNetwork }) => {
+  await openApp(page); const releases = queueComparison(mockNetwork, { hold: true }); await connectMockKey(page);
+  await page.locator('#compare-button').click(); await expect.poll(() => mockNetwork.requests.length).toBe(5);
+  await page.locator('#cancel-button').click(); releases.forEach(release => release());
+  await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.model-result .selected-result-row')).toHaveCount(0);
+  queueComparison(mockNetwork, { billing: true });
+  await expect(page.locator('#compare-button')).toBeEnabled(); await page.locator('#compare-button').click();
+  await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.model-result .selected-result-row')).toHaveCount(5);
+  for (const model of MODELS) await expect(modelCard(page, model.id).locator('.selected-result-row')).toContainText('請求サポート');
+  await expect(page.locator('#session-count')).toHaveText('10');
+  expect(mockNetwork.requests).toHaveLength(10);
+});
+
+test('TEST-ONLY-MOCK free model request retains its explicit route and never falls back to paid', async ({ page, mockNetwork }) => {
+  await openApp(page); const model = MODELS.find(item => item.id.endsWith(':free'));
+  await page.locator('#model-select').selectOption(model.id); await expect(page.locator('#model-info')).toContainText('入力 $0 /');
+  const body = choiceResponse(); body.model = model.canonicalId; mockNetwork.queue(body, { requestModel: model.id });
+  await connectMockKey(page); await page.locator('#run-button').click(); await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#live-status')).toHaveText('実APIの結果');
+  expect(mockNetwork.requests[0].model).toBe('inception/mercury-decide:free');
+  expect(mockNetwork.requests).toHaveLength(1);
+});
+
+test('TEST-ONLY-MOCK one forbidden model does not delete the saved key used successfully by others', async ({ page, mockNetwork }) => {
+  await openApp(page); queueComparison(mockNetwork, { failed: MODELS[1].id, failedStatus: 403 });
+  await connectMockKey(page); await page.locator('#compare-button').click(); await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(modelCard(page, MODELS[1].id)).toContainText('HTTP 403');
+  await expect(page.locator('.model-result .selected-result-row')).toHaveCount(4);
+  await expect(page.locator('#connection-label')).toHaveText('キー保存済み');
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBe(TEST_ONLY_MOCK_KEY);
+  await expect(page.locator('#run-button')).toBeEnabled();
+  expect(mockNetwork.requests).toHaveLength(5);
+});
+
+test('TEST-ONLY-MOCK four comparisons consume the 20-request allowance and clearing results cannot reset it', async ({ page, mockNetwork }) => {
+  await openApp(page); await connectMockKey(page);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    queueComparison(mockNetwork);
+    await expect(page.locator('#compare-button')).toBeEnabled(); await page.locator('#compare-button').click();
+    await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('#session-count')).toHaveText(String((attempt + 1) * 5));
+  }
+  await expect(page.locator('#compare-button')).toBeDisabled(); await expect(page.locator('#run-button')).toBeDisabled();
+  await page.locator('.session-details > summary').click(); await page.locator('#clear-session').click();
+  await expect(page.locator('#session-count')).toHaveText('20');
+  await expect(page.locator('#compare-button')).toBeDisabled(); await expect(page.locator('#run-button')).toBeDisabled();
+  await expect(page.locator('.selected-result-row')).toHaveCount(0);
+  expect(mockNetwork.requests).toHaveLength(20);
+});
+
+test('TEST-ONLY-MOCK comparison timeout clears pending state without accepting late responses', async ({ page, mockNetwork }) => {
+  await page.clock.install(); await openApp(page);
+  const releases = queueComparison(mockNetwork, { hold: true }); await connectMockKey(page); await page.locator('#compare-button').click();
+  await expect.poll(() => mockNetwork.requests.length).toBe(5);
+  await page.clock.fastForward(45001); releases.forEach(release => release());
+  await expect(output(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.model-result-status', { hasText: '取得に失敗' })).toHaveCount(5);
+  await expect(page.locator('.selected-result-row')).toHaveCount(0);
+  expect(mockNetwork.requests).toHaveLength(5);
 });

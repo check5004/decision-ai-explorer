@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EXAMPLES } from '../public/examples.js';
-import { MODEL, LIMITS } from '../public/model.js';
+import { MODEL, MODELS, getModel, LIMITS } from '../public/model.js';
 import { buildRequest, validateResponse, requestDecision, probabilityRows, answerSummary, summarizeRuns, redactSecret, DecisionError, inspectModelIdentity } from '../public/core.js';
 const request = () => buildRequest(JSON.stringify(EXAMPLES[0].state), JSON.stringify(EXAMPLES[0].questions));
 const response = () => ({ id: 'test-fixture-not-a-live-run', model: MODEL.id, provider: 'test-fixture', answers: { team: { type: 'choice', choice: 'technical_support', probabilities: { technical_support: .8, billing_support: .15, product_guidance: .05 }, confidence: .7 } }, usage: { input_tokens: 321, output_tokens: 0, cost: .000013482 } });
@@ -119,4 +119,56 @@ test('canonical response remains unchanged after request validation and identity
   assert.equal(result.data.model, MODEL.canonicalId);
   assert.equal(result.identity.verified, true);
   assert.equal(result.identity.match, 'documented-canonical-id');
+});
+
+test('only the five documented request models are selectable with their exact canonical mapping', () => {
+  assert.equal(MODELS.length, 5);
+  for (const model of MODELS) {
+    assert.equal(getModel(model.id), model);
+    const req = buildRequest(JSON.stringify(EXAMPLES[0].state), JSON.stringify(EXAMPLES[0].questions), model.id);
+    assert.equal(req.model, model.id);
+    assert.equal(inspectModelIdentity(model.id, model.id).verified, true);
+    assert.equal(inspectModelIdentity(model.canonicalId, model.id).verified, true);
+    assert.equal(inspectModelIdentity(model.canonicalId + '-extra', model.id).verified, false);
+    for (const other of MODELS.filter(item => item.id !== model.id)) assert.equal(inspectModelIdentity(other.canonicalId, model.id).verified, false);
+  }
+  assert.throws(() => buildRequest('{}', JSON.stringify(EXAMPLES[0].questions), '~typesafe/jev-latest'), /登録済み/);
+  assert.equal(inspectModelIdentity('arbitrary/model', 'arbitrary/model').verified, false);
+});
+test('Mercury free request identity stays distinct from the documented canonical response', async () => {
+  const model = getModel('inception/mercury-decide:free');
+  const req = buildRequest(JSON.stringify(EXAMPLES[0].state), JSON.stringify(EXAMPLES[0].questions), model.id);
+  let sent;
+  const result = await requestDecision({ request: req, key: 'unit-test-only', fetchImpl: async (_url, options) => {
+    sent = JSON.parse(options.body); return new Response(JSON.stringify({ ...response(), model: model.canonicalId }));
+  } });
+  assert.equal(sent.model, 'inception/mercury-decide:free');
+  assert.equal(result.identity.requested, model.id);
+  assert.equal(result.data.model, 'inception/mercury-decide-20260930');
+  assert.equal(result.identity.verified, true);
+  assert.equal(inspectModelIdentity('inception/mercury-decide', model.id).verified, false);
+});
+test('different models never share timing, request counts, failures or billing aggregates', () => {
+  const [ms, jev] = MODELS;
+  const run = (requested, returned, time, cost) => ({ request: { model: requested }, result: { data: { ...response(), model: returned, usage: { cost } }, timing: { totalMs: time } } });
+  const runs = [run(ms.id, ms.canonicalId, 100, 0.1), run(jev.id, jev.canonicalId, 900, 0.2), run(jev.id, ms.canonicalId, 1, undefined), { request: { model: jev.id }, error: { body: {} } }];
+  const a = summarizeRuns(runs, ms.id); const b = summarizeRuns(runs, jev.id);
+  assert.equal(a.attempts, 1); assert.equal(a.medianMs, 100); assert.equal(a.reportedCost, 0.1);
+  assert.equal(b.attempts, 3); assert.equal(b.successes, 2); assert.equal(b.medianMs, 900);
+  assert.equal(b.unverifiedModels, 1); assert.equal(b.reportedCost, 0.2); assert.equal(b.missingCosts, 2);
+});
+test('a shared comparison start is used for measured response time without inventing model inference time', async () => {
+  let tick = 100;
+  const result = await requestDecision({ request: request(), key: 'unit-test-only', startedAt: 50,
+    now: () => { tick += 10; return tick; },
+    fetchImpl: async () => new Response(JSON.stringify(response())) });
+  assert.equal(result.timing.headersMs, 60);
+  assert.equal(result.timing.totalMs, 70);
+  assert.equal(result.timing.inferenceMs, undefined);
+});
+test('unregistered request model is rejected before networking without fallback', async () => {
+  let calls = 0;
+  await assert.rejects(requestDecision({ request: { ...request(), model: 'unknown/model' }, key: 'unit-test-only',
+    fetchImpl: async () => { calls++; return new Response('{}'); } }), /登録済み/);
+  assert.equal(calls, 0);
 });

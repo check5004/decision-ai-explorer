@@ -1,4 +1,4 @@
-import { MODEL, LIMITS } from './model.js';
+import { MODEL, getModel, LIMITS } from './model.js';
 
 export class DecisionError extends Error {
   constructor(message, { status = null, body = null, timing = null } = {}) { super(message); this.name = 'DecisionError'; this.status = status; this.body = body; this.timing = timing; }
@@ -11,7 +11,8 @@ export function parseObject(text, label) {
   return value;
 }
 
-export function buildRequest(stateText, questionsText) {
+export function buildRequest(stateText, questionsText, modelId = MODEL.id) {
+  if (!getModel(modelId)) throw new Error('登録済みの判断モデルを選んでください。');
   const state = parseObject(stateText, '入力');
   const questions = parseObject(questionsText, '質問');
   const entries = Object.entries(questions);
@@ -30,7 +31,7 @@ export function buildRequest(stateText, questionsText) {
     }
     for (const key of Object.keys(question)) if (!['type', 'instructions', 'criteria'].includes(key)) throw new Error(`${name}: 未対応の質問フィールド ${key} です。`);
   }
-  const request = { model: MODEL.id, state, questions };
+  const request = { model: modelId, state, questions };
   const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
   if (bytes > LIMITS.maxPayloadBytes) throw new Error(`入力が大きすぎます。このPoCはリクエスト全体を${LIMITS.maxPayloadBytes.toLocaleString()}バイトまでに制限しています。`);
   return request;
@@ -68,8 +69,9 @@ export function validateResponse(data, request) {
   return data;
 }
 
-export async function requestDecision({ request, key, signal, fetchImpl = fetch, now = () => performance.now() }) {
-  const started = now();
+export async function requestDecision({ request, key, signal, fetchImpl = fetch, now = () => performance.now(), startedAt = null }) {
+  if (!getModel(request?.model)) throw new DecisionError('登録済みの判断モデルを選んでください。');
+  const started = startedAt ?? now();
   let headersMs = null;
   let response;
   try {
@@ -101,7 +103,7 @@ export async function requestDecision({ request, key, signal, fetchImpl = fetch,
       throw new DecisionError(`HTTP ${response.status}: ${explanation}`, { status: response.status, body: data, timing });
     }
     try { validateResponse(data, request); } catch (error) { throw new DecisionError(error.message, { status: response.status, body: data, timing }); }
-    return { data, timing, identity: inspectModelIdentity(data.model), receivedAt: new Date().toISOString() };
+    return { data, timing, identity: inspectModelIdentity(data.model, request.model), receivedAt: new Date().toISOString() };
   } catch (error) {
     if (error instanceof DecisionError) { if (!error.timing) error.timing = { headersMs, totalMs: now() - started }; throw error; }
     const message = signal?.aborted ? '通信を中断しました。サーバー側で完了している場合、料金が発生する可能性があります。' : '通信に失敗しました。ネットワーク、CORS、ブラウザー拡張の制限を確認してください。自動再試行はしません。';
@@ -109,15 +111,14 @@ export async function requestDecision({ request, key, signal, fetchImpl = fetch,
   }
 }
 
-export function inspectModelIdentity(returnedId) {
-  const exact = returnedId === MODEL.id;
-  const canonical = returnedId === MODEL.canonicalId;
+export function inspectModelIdentity(returnedId, requestedId = MODEL.id) {
+  const model = getModel(requestedId);
+  const exact = !!model && returnedId === model.id;
+  const canonical = !!model && returnedId === model.canonicalId;
   return {
-    requested: MODEL.id,
-    returned: returnedId,
-    verified: exact || canonical,
+    requested: requestedId, returned: returnedId, verified: exact || canonical,
     match: exact ? 'requested-id' : canonical ? 'documented-canonical-id' : 'unrecognized',
-    evidence: canonical ? { url: MODEL.identityReference, checkedAt: MODEL.identityCheckedAt } : null,
+    evidence: canonical ? { url: model.identityReference, checkedAt: model.identityCheckedAt } : null,
   };
 }
 
@@ -130,9 +131,11 @@ export function answerSummary(answer) {
   return answer.type === 'choice' ? answer.choice : answer.type === 'noul' ? `P(true) = ${(answer.noul * 100).toFixed(1)}%` : `score = ${answer.score.toFixed(2)}`;
 }
 
-export function summarizeRuns(runs) {
+export function summarizeRuns(allRuns, modelId = MODEL.id) {
+  // Runtime records always carry the immutable request; default supports older single-model records.
+  const runs = allRuns.filter(x => (x.request?.model ?? x.result?.identity?.requested ?? MODEL.id) === modelId);
   const successful = runs.filter(x => x.result);
-  const identityVerified = successful.filter(x => inspectModelIdentity(x.result.data.model).verified);
+  const identityVerified = successful.filter(x => inspectModelIdentity(x.result.data.model, modelId).verified);
   const timings = identityVerified.map(x => x.result.timing.totalMs).sort((a, b) => a - b);
   const middle = Math.floor(timings.length / 2);
   const median = timings.length ? (timings.length % 2 ? timings[middle] : (timings[middle - 1] + timings[middle]) / 2) : null;

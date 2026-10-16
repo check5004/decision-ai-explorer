@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://openrouter.ai; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
-  <meta name="description" content="Microsoft Decision-1の実APIで、判断から生まれるプロダクトを考える。6つの架空のユースケースを1ページで試す、小さな実験室。">
+  <meta name="description" content="Jev・Microsoftなど5つの判断モデルを同じ入力で比較する、OpenRouter実APIの実験ページ。">
   <title>Decision Atelier — 判断AIを6つのお題で試す</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
@@ -20,10 +20,14 @@
   <p id="key-storage-notice" class="section-shell session-note" role="status" hidden></p>
   <main id="top">
     <section class="intro section-shell" aria-labelledby="hero-title">
-      <p class="intro-model">Microsoft Decision-1 / OpenRouter</p>
+      <p class="intro-model">5つの判断モデル / OpenRouter</p>
       <h1 id="hero-title">AIに、どんな判断を任せる？</h1>
-      <p class="intro-description">お題を選び、条件を変えて実行。AIの判断を、日本語の候補・割合・評価で確認できます。</p>
+      <p class="intro-description">同じ条件を5つのモデルへ同時に送り、判断結果・割合・通信込み所要時間を比べられます。</p>
       <ol class="quick-steps" aria-label="使い方"><li><span>1</span>お題を選ぶ</li><li><span>2</span>条件を編集する</li><li><span>3</span>結果と割合を見る</li></ol>
+    </section>
+    <section class="model-section section-shell" aria-labelledby="model-label">
+      <div class="model-picker"><label id="model-label" for="model-select">単体で試すモデル</label><select id="model-select"></select><a id="model-reference" href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">公式モデル情報 ↗</a></div>
+      <p id="model-info" class="session-note"></p><p class="field-note">選択を変えるだけでは通信しません。対応は公式仕様で確認済みですが、各モデルの実API認証・推論はこのページから実行して確認してください。</p>
     </section>
     <section id="examples" class="examples-section section-shell" aria-labelledby="examples-title">
       <div class="section-heading"><h2 id="examples-title">1. 試すお題を選ぶ</h2><p>すべて架空のデータです</p></div>
@@ -32,13 +36,13 @@
     <section id="workspace" class="workspace-section section-shell" aria-labelledby="workspace-title">
       <div class="workspace-heading"><div><p class="section-kicker">選択中のお題</p><h2 id="workspace-title" tabindex="-1"></h2><p id="active-benefit" class="active-benefit"></p></div><span class="badge neutral" id="live-status">未実行</span></div>
       <div id="scenario-flow" class="scenario-flow" aria-label="このお題で試すこと"></div>
-      <div class="workbench">
+      <div class="workbench" id="workbench" data-mode="single">
         <section class="input-panel" aria-labelledby="input-title"><div class="panel-topline"><h3 id="input-title">2. 条件を確認・編集</h3><button class="text-button" id="reset-example">初期値に戻す</button></div>
           <div id="friendly-fields" class="friendly-fields"></div>
           <div id="validation-error" class="error-message" role="alert" hidden></div>
-          <div class="run-row"><button id="run-button" class="primary-button" disabled><span id="run-label">この条件で判断する</span><span aria-hidden="true">→</span></button><button id="cancel-button" class="secondary-button" hidden>通信を中断</button></div>
+          <p class="comparison-target-note">同時比較の対象（5リクエスト）：<span id="comparison-targets"></span></p><div class="run-row"><button id="compare-button" class="primary-button" disabled><span id="compare-label">5モデルを同時に比較</span><span aria-hidden="true">→</span></button><button id="run-button" class="secondary-button" disabled><span id="run-label">この条件で判断する</span><span aria-hidden="true">→</span></button><button id="cancel-button" class="secondary-button" hidden>通信を中断</button></div>
           <button id="connect-inline" class="text-button connect-inline">実行するにはAPIキーを設定 →</button>
-          <p class="run-disclosure">1クリックで有料APIを1回呼びます。入力はOpenRouterとモデル提供元に送られます。</p>
+          <p class="run-disclosure">比較は1クリックで5モデルへ並列送信します。単体は選択モデルに1回送信。入力はOpenRouterと各モデル提供元に送られ、有料モデルの料金が発生します。</p><p id="remaining-requests" class="field-note"></p><button id="view-comparison" class="text-button" hidden>直前の比較結果を表示</button>
           <details class="advanced-settings" id="advanced-settings"><summary>詳細設定：JSON・判断基準を編集</summary>
             <p>通常は上の項目だけで試せます。ここでは入力と判断基準を直接変更できます。</p>
             <div class="editor-tabs" role="tablist" aria-label="詳細編集"><button id="state-tab" role="tab" aria-selected="true" aria-controls="state-editor-panel" tabindex="0">入力JSON</button><button id="questions-tab" role="tab" aria-selected="false" aria-controls="questions-editor-panel" tabindex="-1">判断基準JSON</button></div>
@@ -50,24 +54,26 @@
         <section class="output-panel" aria-labelledby="output-title"><div class="panel-topline"><h3 id="output-title">3. 判断結果を比べる</h3><button class="text-button" id="export-button" disabled>結果を保存 ↓</button></div><div id="output-content" aria-live="polite" aria-busy="false"></div></section>
       </div>
       <details class="session-details"><summary>実行履歴・APIの詳細</summary>
-        <div class="session-bar"><div><span>試行</span><strong id="session-count">0</strong><span>成功</span><strong id="session-successes">0</strong><span>応答中央値</span><strong id="session-median">—</strong><span>報告済み料金</span><strong id="session-cost">—</strong></div><button class="text-button" id="clear-session">結果をクリア</button></div><p id="cost-note" class="session-note"></p>
-        <p class="session-note">Decision-1応答時間: <span id="hero-measurement">未計測</span></p>
+        <div class="session-bar"><div><span>試行</span><strong id="session-count">0</strong><span>選択モデルの成功</span><strong id="session-successes">0</strong><span>選択モデルの中央値</span><strong id="session-median">—</strong><span>選択モデルの報告料金</span><strong id="session-cost">—</strong></div><button class="text-button" id="clear-session">結果をクリア</button></div><p id="cost-note" class="session-note"></p>
+        <p class="session-note"><span id="session-model-name">Microsoft Decision 1</span> の応答時間: <span id="hero-measurement">未計測</span></p>
+        <div class="model-summary-scroll"><table class="model-summary"><caption>モデル別の実行履歴（速度は確認済みIDの成功だけ）</caption><thead><tr><th scope="col">モデル</th><th scope="col">試行 / 成功</th><th scope="col">応答中央値</th><th scope="col">速度集計n</th><th scope="col">報告料金</th></tr></thead><tbody id="model-summary-body"></tbody></table></div>
+        <details class="history-details"><summary>完了したリクエストの履歴</summary><ol id="run-history"></ol></details>
         <details class="request-details"><summary>送信するリクエスト <span>POST /api/alpha/decisions</span></summary><pre id="request-preview"></pre><p>認証ヘッダーは診断や結果ファイルに含めません。</p></details>
       </details>
     </section>
     <section class="about-section section-shell" aria-label="利用上の注意"><details><summary>このデモの仕組み・料金・注意点</summary>
-      <p>Microsoft Decision-1は、指定した候補から選ぶ・条件を満たす度合いを測る・段階で評価するモデルです。理由の文章を生成するデモではありません。</p>
-      <p>入力料金は100万トークンあたり$0.042、出力は$0（2026年10月15日確認）。APIキーはこのブラウザーに保存し、リロード後も使えます。結果と履歴はリロードで消えます。キーは接続設定の「保存したキーを削除」で消せます。API利用料は各自のOpenRouterアカウントに発生します。</p>
+      <p>登録した5モデルは、指定した候補から選ぶ・条件を満たす度合いを測る・段階で評価する共通の判断APIに対応しています。理由の文章を生成するデモではありません。</p>
+      <p>料金はモデルで異なります。2026年10月16日の公式catalogでは、100万入力トークンあたりMicrosoft/Jevは$0.042、Perplexity/Liquidは$0.02、Mercury Freeは$0、出力はいずれも$0です。価格・無料枠・利用制限は変更される場合があり、結果の料金はAPIが実際に返した値を表示します。APIキーはこのブラウザーに保存し、リロード後も使えます。結果と履歴はリロードで消えます。キーは接続設定の「保存したキーを削除」で消せます。API利用料は各自のOpenRouterアカウントに発生します。</p>
       <p>確率はモデルが各候補に割り当てた値で、正解率ではありません。判断を本番の自動処理につなぐ前に、用途ごとの検証が必要です。このデモでは送信・発注・デプロイなどの操作は行いません。</p>
-      <p>応答時間は通信を含む実測値です。自動実行・自動再試行・別モデルへの切り替え・疑似結果はありません。alpha APIの仕様や価格は変更される場合があります。</p>
+      <p>応答時間は通信を含む実測値です。クリックなしの自動実行・自動再試行・失敗時の別モデルへの切り替え・疑似結果はありません。alpha APIの仕様や価格は変更される場合があります。</p>
     </details></section>
   </main>
-  <footer class="site-footer section-shell"><span>Decision Atelier · 非公式の実験用PoC</span><div class="footer-links"><a href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">モデル・料金 ↗</a><a href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request" target="_blank" rel="noopener noreferrer">API仕様 ↗</a></div></footer>
+  <footer class="site-footer section-shell"><span>Decision Atelier · 非公式の実験用PoC</span><div class="footer-links"><a id="model-footer-reference" href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">モデル・料金 ↗</a><a href="https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request" target="_blank" rel="noopener noreferrer">API仕様 ↗</a></div></footer>
   <dialog id="connection-dialog" aria-labelledby="connection-title"><div class="dialog-heading"><div><div class="eyebrow">OpenRouterのキーを使用</div><h2 id="connection-title">APIキーを設定</h2></div><button id="close-connection" class="icon-button" aria-label="接続設定を閉じる">×</button></div><p class="dialog-intro">キーをこのブラウザーに保存し、リロード後も使います。保存データは暗号化されません。同じドメインの別ページや拡張機能からアクセスされるリスクがあります。共有端末では保存しないでください。不要になったら下の削除ボタンで消せます。</p>
-    <div class="price-note"><span>MICROSOFT DECISION-1</span><strong>入力 $0.042 / 100万tokens · 出力 $0</strong><p>無料枠のモデルではありません。料金は変更される場合があります。<a href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">最新料金 ↗</a></p></div>
+    <div class="price-note"><span id="connection-model-name">Microsoft Decision 1</span><strong id="connection-model-price">入力 $0.042 / 100万トークン · 出力 $0</strong><p>選択モデルの参考料金です。一括比較は5モデル分で、無料枠にも利用制限があります。料金は変更される場合があります。<a id="connection-model-reference" href="https://openrouter.ai/microsoft/microsoft-decision-1" target="_blank" rel="noopener noreferrer">最新料金 ↗</a></p></div>
     <p id="key-storage-status" class="field-note" role="status"></p>
     <form id="connection-form"><label for="api-key">OpenRouter APIキー</label><input id="api-key" type="password" name="decision-key" placeholder="sk-or-v1-…" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="512"><p class="field-note">このページでの入力はチャットには送られません。キーはOpenRouterへの認証にだけ使用します。</p><label class="checkbox-label"><input id="consent" type="checkbox"><span>キーをこのブラウザーに保存すること、実行時に入力内容がOpenRouterとモデル提供元に送られてAPI料金がかかることを確認しました。個人情報・社外秘は入力しません。</span></label><div id="connection-error" class="error-message" role="alert" hidden></div><div class="dialog-actions"><button class="primary-button" type="submit">このブラウザーに保存 <span aria-hidden="true">↗</span></button><button class="secondary-button" id="remove-key" type="button" hidden>保存したキーを削除</button></div></form>
-    <p class="security-note">キーの利用上限は<a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouterのキー設定</a>で少額にしてください。このPoCは1タブ20回・同時1件に制限しますが、請求上限を保証するものではありません。共有端末・不明なブラウザー拡張では利用を避けてください。</p>
+    <p class="security-note">キーの利用上限は<a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouterのキー設定</a>で少額にしてください。このPoCは1タブ20リクエスト・同時最大5件に制限しますが、請求上限を保証するものではありません。共有端末・不明なブラウザー拡張では利用を避けてください。</p>
   </dialog>
 </body>
 </html>
