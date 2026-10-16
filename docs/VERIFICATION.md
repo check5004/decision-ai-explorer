@@ -1,6 +1,6 @@
 # Verification record
 
-Date: 2026-10-15 UTC. The tests here distinguish transport/UI validation from actual model inference.
+Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here distinguish transport/UI validation from actual model inference.
 
 ## UX revision (2026-10-16 UTC)
 
@@ -8,7 +8,9 @@ Date: 2026-10-15 UTC. The tests here distinguish transport/UI validation from ac
 - Result candidates are a Japanese table. Unrun rows have no percentage or color bar; returned choice probabilities receive bars and a selected-row marker. Score stays a continuous score with per-level probabilities; noul shows the returned true degree and a clearly identified complement. No model-generated rationale is invented.
 - Raw JSON, request criteria, and measurement metadata are collapsed by default. Edited input marks previous output as stale, and rerun removes previous results while waiting.
 - All 25 local syntax/unit/static-server/presentation checks passed again on 2026-10-16. The exact API transport, model ID, and fictional presets are unchanged.
-- Twelve isolated Chromium browser tests are prepared (desktop and mobile), with deny-by-default external networking and visible TEST-ONLY-MOCK watermarks. Local launch was blocked before page load by executor socket restrictions; the supported escalated execution path also failed before launching. This is not a passed or failed application interaction test. The revision will be tested on a non-deploying CI branch before promotion to main.
+- Twelve isolated Chromium browser tests are prepared (desktop and mobile), with deny-by-default external networking and visible TEST-ONLY-MOCK watermarks. Local launch was blocked before page load by executor socket restrictions; the supported escalated execution path also failed before launching. This is not a passed or failed application interaction test. The same 12 cases passed on the non-deploying CI branch before promotion to main; see the run below.
+- [CI run 38829534886](https://github.com/check5004/decision-ai-explorer/actions/runs/38829534886), candidate commit `85885113fa3e0be252d9ef99ffbd8094aa7fc8c1`: all 25 Node checks, 12 browser regressions, and Docker build/runtime smoke passed. Pages deployment was skipped as intended on the review branch.
+- Visual review of the CI artifact passed for desktop and mobile initial/no-key screens, Japanese choice rows and selected outcome, score, noul, and error-without-result states. Seven screenshots were inspected; all are labeled TEST-ONLY-MOCK and are not real inference measurements. Mobile coverage is Chromium Pixel 7 emulation, not a physical-device test. Keyboard selection, multiple questions, stale output, pending rerun, key removal, reload clearing, and failure without retries passed as browser assertions.
 - Authenticated inference remains unverified: no real API key has been supplied and no inference request was made.
 
 ## Passed locally
