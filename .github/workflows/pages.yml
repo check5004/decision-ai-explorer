@@ -1,7 +1,7 @@
 name: Check and deploy GitHub Pages
 on:
   push:
-    branches: [main]
+    branches: [main, fix-decision-model-id-20261016]
   workflow_dispatch:
 permissions:
   contents: read

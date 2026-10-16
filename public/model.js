@@ -1,5 +1,9 @@
 export const MODEL = Object.freeze({
   id: 'microsoft/microsoft-decision-1',
+  // Exact alias -> canonical ID from the official model catalog; never a prefix/date wildcard.
+  canonicalId: 'microsoft/microsoft-decision-1-20261009',
+  identityReference: 'https://openrouter.ai/api/v1/models?output_modalities=decisions',
+  identityCheckedAt: '2026-10-16',
   endpoint: 'https://openrouter.ai/api/alpha/decisions',
   inputPerMillion: 0.042,
   outputPerMillion: 0,

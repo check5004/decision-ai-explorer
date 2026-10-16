@@ -2,6 +2,22 @@
 
 Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here distinguish transport/UI validation from actual model inference.
 
+## Browser key persistence (2026-10-16 UTC)
+
+- At the user's request, explicit Save now persists their own UI-entered key in one app-specific localStorage entry. Reload restores it without making a request; result/history persistence is unchanged. The password field is cleared and never repopulated with the saved value.
+- Delete clears active memory plus the stored entry and verifies deletion. Read/write/delete failures are visible and never reported as successful. Authentication rejection removes the saved key. Other tabs follow storage changes.
+- UI and security documentation explain plaintext browser storage, same-origin access, shared-device risk, and the deletion action.
+- New regression tests use only a clearly synthetic credential. They cover restoration, deletion and reload, blocked read/write/delete, silent storage failures, invalid values, other-tab removal, and credential redaction from error display, console, URLs and exported diagnostics.
+- Full Node/browser/Docker checks are pending review-branch CI. No real key was read, entered, saved or sent by the maintainers.
+
+## Canonical model identity correction (2026-10-16 UTC)
+
+- Official evidence: [OpenRouter decision-model catalog](https://openrouter.ai/api/v1/models?output_modalities=decisions) returns one record with `id: microsoft/microsoft-decision-1` and `canonical_slug: microsoft/microsoft-decision-1-20261009`. The unfiltered text-model list did not contain this decision model; the decisions modality filter is required for this check.
+- The request alias is unchanged. Identity inspection and latency aggregation both accept only the requested alias or this one exact documented canonical ID. There is no prefix match, date regex, auto-discovery call, or model fallback. Unknown identifiers still trigger a warning and remain excluded.
+- Both raw IDs and the canonical-match source/date are retained in diagnostics and JSON exports.
+- The user reported the displayed returned ID. That report alone does not establish answer correctness, actual response timing, or successful end-to-end inference verified by the maintainers. No real key or paid inference is used for this correction.
+- Regression coverage adds exact canonical acceptance, lookalike/unknown-date rejection, mixed timing aggregation, unchanged request/response IDs, and isolated browser checks for accepted and unknown IDs. The selected local execution environment is unavailable; full tests will run in the review branch CI before production publication.
+
 ## UX revision (2026-10-16 UTC)
 
 - The six topics remain cards, with direct Japanese titles, benefits, ordinary editable fields, and a short input → decision → use explanation.
@@ -10,7 +26,7 @@ Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here di
 - All 25 local syntax/unit/static-server/presentation checks passed again on 2026-10-16. The exact API transport, model ID, and fictional presets are unchanged.
 - Twelve isolated Chromium browser tests are prepared (desktop and mobile), with deny-by-default external networking and visible TEST-ONLY-MOCK watermarks. Local launch was blocked before page load by executor socket restrictions; the supported escalated execution path also failed before launching. This is not a passed or failed application interaction test. The same 12 cases passed on the non-deploying CI branch before promotion to main; see the run below.
 - [CI run 38829534886](https://github.com/check5004/decision-ai-explorer/actions/runs/38829534886), candidate commit `85885113fa3e0be252d9ef99ffbd8094aa7fc8c1`: all 25 Node checks, 12 browser regressions, and Docker build/runtime smoke passed. Pages deployment was skipped as intended on the review branch.
-- Visual review of the CI artifact passed for desktop and mobile initial/no-key screens, Japanese choice rows and selected outcome, score, noul, and error-without-result states. Seven screenshots were inspected; all are labeled TEST-ONLY-MOCK and are not real inference measurements. Mobile coverage is Chromium Pixel 7 emulation, not a physical-device test. Keyboard selection, multiple questions, stale output, pending rerun, key removal, reload clearing, and failure without retries passed as browser assertions.
+- Visual review of the CI artifact passed for desktop and mobile initial/no-key screens, Japanese choice rows and selected outcome, score, noul, and error-without-result states. Seven screenshots were inspected; all are labeled TEST-ONLY-MOCK and are not real inference measurements. Mobile coverage is Chromium Pixel 7 emulation, not a physical-device test. Keyboard selection, multiple questions, stale output, pending rerun, key removal, then reload clearing, and failure without retries passed as browser assertions.
 - Authenticated inference remains unverified: no real API key has been supplied and no inference request was made.
 
 ## Passed locally
@@ -37,7 +53,7 @@ Updated: 2026-10-16 UTC (initial release verified 2026-10-15). The tests here di
 
 ## Live QA procedure
 
-Use a low-limit key and fictional inputs only. Enter the key directly in the app; do not put it in chat. At least one example for each type should be exercised: support (`choice`), release (`noul`), inventory (`score`). Record actual API ID, exact model snapshot, provider, input/output tokens, usage.cost, header time and total time through the app's JSON export. Confirm no canned result appears on an unrun card. Check an input edit marks an old output as stale. Check reset, tab switching, modal close/Escape, key removal and reload clearing.
+Use a low-limit key and fictional inputs only. Enter the key directly in the app; do not put it in chat. At least one example for each type should be exercised: support (`choice`), release (`noul`), inventory (`score`). Record actual API ID, exact model snapshot, provider, input/output tokens, usage.cost, header time and total time through the app's JSON export. Confirm no canned result appears on an unrun card. Check an input edit marks an old output as stale. Check reset, tab switching, modal close/Escape, saved-key restoration on reload without automatic calls, and key removal followed by reload. Verify that failed storage operations explain the problem without claiming success.
 
 Any test failure should remain visible and should not be replaced with a guessed response. Do not repeatedly retry a failing request automatically. Keep actual benchmark attempts and known API charges within the user's approved limit.
 

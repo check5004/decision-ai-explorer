@@ -2,7 +2,11 @@
 
 ## Credentials
 
-The user enters an OpenRouter key in a password-type field. It moves into a module-scoped variable after explicit acknowledgment, and the field is cleared. The application does not use cookies, localStorage, sessionStorage, IndexedDB, analytics, or telemetry. It clears the key on pagehide and provides a remove-key action. Ordinary JavaScript cannot promise cryptographic erasure of all process memory; browser extensions, browser developer tools, a compromised host, or a compromised dependency/OS could still access the tab.
+The user enters an OpenRouter key in a password-type field and explicitly confirms browser storage and API charges. On Save, the app writes only that key to the app-specific localStorage entry `decision-atelier.openrouter-key.v1`, verifies the write, copies it into a module-scoped variable, and clears the input field. A saved key is restored on reload; no API call is made until the user clicks Run. Restored values are never populated back into the input field. Inputs, results and execution history are not persisted.
+
+This is plaintext, origin-scoped browser storage, not encrypted secret storage. Other pages on the same origin (including other GitHub Pages projects under the same owner), extensions, developer tools, a compromised host or OS can access it. Use a low-limit key and do not save it on shared/untrusted devices. Clearing browser site data may also remove it. The application does not use cookies, sessionStorage, IndexedDB, analytics, or telemetry.
+
+The remove-key action clears active memory and the field first, removes only this app's entry, and checks deletion. Other tabs observe storage changes. A failed read/write/delete displays a fixed explanation without logging the exception or claiming completion; a failed deletion explains that persisted data may remain and how to retry/clear site data. HTTP 401/403 invokes the same deletion path. Pagehide clears active memory but deliberately leaves the saved entry so reload works. Ordinary JavaScript cannot guarantee cryptographic erasure of all browser process memory.
 
 The key is sent only as an Authorization header to the fixed `https://openrouter.ai/api/alpha/decisions` endpoint. Requests omit browser credentials, disallow redirects and use no-referrer. The public site and static server never receive or store the key. Do not put keys in GitHub Actions secrets, Docker builds, URLs, source files, or chat for this static design.
 
@@ -23,7 +27,7 @@ The site makes no automatic model calls. There are no retry loops, no automatic 
 - GitHub Pages does not provide configurable HTTP security headers; its CSP is a meta policy. The app disables embedded iframe operation as an additional defense. It is not a replacement for a host-level frame-ancestors header.
 - The static server serves only an explicit asset allowlist and ignores secret environment variables.
 - The container runs as the non-root node user. The recommended local invocation drops capabilities and uses a read-only filesystem.
-- Responses are size bounded and validate expected question keys, type/choice/score/probability bounds before rendering. Returned model identity is shown verbatim; nonmatching IDs are flagged and excluded from headline Decision-1 latency statistics, rather than silently treated as the requested model.
+- Responses are size bounded and validate expected question keys, type/choice/score/probability bounds before rendering. Returned model identity is shown verbatim. Only the exact requested ID or its one explicitly documented canonical ID (microsoft/microsoft-decision-1-20261009, verified against the official catalog on 2026-10-16) is included in Decision-1 latency statistics. Unknown IDs, other dates, suffixes, and prefix lookalikes remain flagged and excluded. Requested and returned IDs plus the matching basis remain in diagnostic data.
 - No uploaded files, webhooks, tool execution, email, deployment, purchase, or other consequential actions occur based on model output.
 
 ## Expected risks / boundaries

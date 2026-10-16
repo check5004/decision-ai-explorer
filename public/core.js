@@ -110,7 +110,15 @@ export async function requestDecision({ request, key, signal, fetchImpl = fetch,
 }
 
 export function inspectModelIdentity(returnedId) {
-  return { requested: MODEL.id, returned: returnedId, verified: returnedId === MODEL.id };
+  const exact = returnedId === MODEL.id;
+  const canonical = returnedId === MODEL.canonicalId;
+  return {
+    requested: MODEL.id,
+    returned: returnedId,
+    verified: exact || canonical,
+    match: exact ? 'requested-id' : canonical ? 'documented-canonical-id' : 'unrecognized',
+    evidence: canonical ? { url: MODEL.identityReference, checkedAt: MODEL.identityCheckedAt } : null,
+  };
 }
 
 export function probabilityRows(answer, question) {
@@ -124,7 +132,7 @@ export function answerSummary(answer) {
 
 export function summarizeRuns(runs) {
   const successful = runs.filter(x => x.result);
-  const identityVerified = successful.filter(x => x.result.data.model === MODEL.id);
+  const identityVerified = successful.filter(x => inspectModelIdentity(x.result.data.model).verified);
   const timings = identityVerified.map(x => x.result.timing.totalMs).sort((a, b) => a - b);
   const middle = Math.floor(timings.length / 2);
   const median = timings.length ? (timings.length % 2 ? timings[middle] : (timings[middle - 1] + timings[middle]) / 2) : null;

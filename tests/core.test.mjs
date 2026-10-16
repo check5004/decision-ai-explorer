@@ -26,7 +26,7 @@ test('real response validation accepts choice, noul and score shapes', () => {
     validateResponse({ model: MODEL.id, answers: { [Object.keys(req.questions)[0]]: answer } }, req);
   }
 });
-test('malformed responses, alternate model, hallucinated option and bad probabilities are rejected', () => {
+test('malformed responses, missing model, hallucinated option and bad probabilities are rejected', () => {
   assert.throws(() => validateResponse({}, request()), /answers/);
   assert.throws(() => validateResponse({ ...response(), model: '' }, request()), /モデル/);
   const invalid = response(); invalid.answers.team.choice = 'unknown'; assert.throws(() => validateResponse(invalid, request()), /未定義/);
@@ -71,8 +71,8 @@ test('unexpected answer keys and confidence fields cannot crash UI rendering', (
   for (const confidence of [null, 'high', Infinity]) assert.throws(() => validateResponse({ model: MODEL.id, answers: { ready_for_review: { type: 'noul', noul: .1, confidence } } }, req), /confidence/);
 });
 
-test('noncanonical model IDs are flagged and excluded from Decision-1 timing statistics', () => {
-  for (const model of ['microsoft/microsoft-decision-10', 'microsoft/microsoft-decision-1-20261009', 'microsoft-decision-1']) {
+test('unrecognized model IDs remain flagged; near matches and arbitrary dates are not allowlisted', () => {
+  for (const model of ['microsoft/microsoft-decision-10', 'microsoft/microsoft-decision-1-20261010', 'microsoft-decision-1', 'microsoft-decision-1-20261009', 'other/microsoft-decision-1-20261009', 'microsoft/microsoft-decision-1-20261009:free', 'microsoft/microsoft-decision-1-20261009-extra', ' microsoft/microsoft-decision-1-20261009', 'microsoft/microsoft-decision-1-20261009 ', 'Microsoft/microsoft-decision-1-20261009', '', null, undefined]) {
     assert.equal(inspectModelIdentity(model).verified, false);
     const summary = summarizeRuns([{ result: { data: { ...response(), model }, timing: { totalMs: 42 } } }]);
     assert.equal(summary.unverifiedModels, 1); assert.equal(summary.medianMs, null);
@@ -82,4 +82,41 @@ test('noncanonical model IDs are flagged and excluded from Decision-1 timing sta
 test('non-JSON secret redaction happens before display truncation', async () => {
   const secret = 'test-credential-do-not-publish';
   await assert.rejects(requestDecision({ request: request(), key: secret, fetchImpl: async () => new Response('x'.repeat(3990) + secret, { status: 500 }) }), error => { assert(!error.body.includes('test-cre')); assert(error.body.endsWith('[REDACTED]')); return true; });
+});
+
+test('documented canonical ID is accepted exactly while requested and returned IDs stay intact', () => {
+  assert.equal(MODEL.id, 'microsoft/microsoft-decision-1');
+  assert.equal(MODEL.canonicalId, 'microsoft/microsoft-decision-1-20261009');
+  const identity = inspectModelIdentity(MODEL.canonicalId);
+  assert.deepEqual(identity, {
+    requested: MODEL.id, returned: MODEL.canonicalId, verified: true,
+    match: 'documented-canonical-id',
+    evidence: { url: 'https://openrouter.ai/api/v1/models?output_modalities=decisions', checkedAt: '2026-10-16' },
+  });
+  assert.equal(inspectModelIdentity(MODEL.id).match, 'requested-id');
+  assert.equal(inspectModelIdentity('microsoft/microsoft-decision-1-20261010').match, 'unrecognized');
+});
+
+test('canonical and alias results share the timing calculation while unknown models stay excluded', () => {
+  const run = (model, totalMs) => ({ result: { data: { ...response(), model }, timing: { totalMs }, identity: { verified: true } } });
+  const canonicalOnly = summarizeRuns([run(MODEL.canonicalId, 42)]);
+  assert.equal(canonicalOnly.medianMs, 42);
+  assert.equal(canonicalOnly.unverifiedModels, 0);
+  const summary = summarizeRuns([run(MODEL.id, 100), run(MODEL.canonicalId, 300), run('microsoft/microsoft-decision-1-20991231', 9999)]);
+  assert.equal(summary.successes, 3);
+  assert.equal(summary.medianMs, 200);
+  assert.equal(summary.unverifiedModels, 1); // A supplied verified flag cannot bypass the ID check.
+});
+
+test('canonical response remains unchanged after request validation and identity inspection', async () => {
+  const data = { ...response(), model: MODEL.canonicalId };
+  let sentModel;
+  const result = await requestDecision({ request: request(), key: 'unit-test-only', fetchImpl: async (_url, options) => {
+    sentModel = JSON.parse(options.body).model;
+    return new Response(JSON.stringify(data), { status: 200 });
+  } });
+  assert.equal(sentModel, MODEL.id);
+  assert.equal(result.data.model, MODEL.canonicalId);
+  assert.equal(result.identity.verified, true);
+  assert.equal(result.identity.match, 'documented-canonical-id');
 });

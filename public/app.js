@@ -1,6 +1,7 @@
 import { EXAMPLES } from './examples.js';
 import { PRESENTATION, getQuestionRows } from './presentation.js';
 import { MODEL, LIMITS } from './model.js';
+import { KEY_STORAGE_NAME, isApiKey, readSavedKey, saveKey, deleteSavedKey } from './credentials.js';
 import { buildRequest, requestDecision, summarizeRuns } from './core.js';
 
 if (window.self !== window.top) {
@@ -15,6 +16,7 @@ const records = new Map(EXAMPLES.map(example => [example.id, { state: pretty(exa
 const history = [];
 let currentId = EXAMPLES[0].id;
 let apiKey = '';
+let keyStorageIssue = false;
 let activeController = null;
 let running = false;
 let lastAttemptAt = -Infinity;
@@ -105,8 +107,8 @@ function updateControls() {
   $('run-button').disabled = !apiKey || running || !requestIsValid || cooldown || sessionAttempts >= LIMITS.maxRuns;
   $('run-label').textContent = running ? '判断中…' : sessionAttempts >= LIMITS.maxRuns ? 'このタブの20回上限に到達' : currentRecord().result ? 'この条件でもう一度判断' : 'この条件で判断する';
   $('cancel-button').hidden = !running; $('connect-inline').hidden = !!apiKey || running;
-  $('connection-label').textContent = apiKey ? 'キー設定済み' : 'APIキーを設定'; $('connection-dot').className = `status-dot${apiKey ? ' connected' : ''}`;
-  $('remove-key').hidden = !apiKey; $('open-connection').disabled = running;
+  $('connection-label').textContent = apiKey ? 'キー保存済み' : 'APIキーを設定'; $('connection-dot').className = `status-dot${apiKey ? ' connected' : ''}`;
+  $('remove-key').hidden = !apiKey && !keyStorageIssue; $('open-connection').disabled = running;
   $('state-editor').disabled = running; $('questions-editor').disabled = running; $('reset-example').disabled = running; $('clear-session').disabled = running;
   for (const input of $('friendly-fields').querySelectorAll('[data-state-key]')) input.disabled = running;
   $('export-button').disabled = running || !(currentRecord().result || currentRecord().error); $('output-content').setAttribute('aria-busy', String(running));
@@ -188,9 +190,9 @@ function renderOutput() {
     const { data, timing, receivedAt, identity } = record.result;
     const isStale = record.sentState !== record.state || record.sentQuestions !== record.questions;
     setBadge(!identity.verified ? '結果あり・モデルID要確認' : isStale ? '前回の結果・入力変更あり' : '実APIの結果', !identity.verified || isStale ? 'neutral' : 'success');
-    if (!identity.verified) root.append(el('p', 'result-stale', `返却モデルID「${data.model}」は要求IDと異なります。同じモデルの版付きIDか確認できていないため、速度の集計から除外しています。`));
+    if (!identity.verified) root.append(el('p', 'result-stale', `返却モデルID「${data.model}」は、このアプリで確認済みのIDに含まれていません。要求したモデルと同一か確認できないため、速度の集計から除外しています。`));
     renderQuestionResults(root, record.request, data.answers); root.append(makeMetrics(timing, data));
-    const meta = { requested_model: MODEL.id, returned_model: data.model, provider: data.provider ?? '未報告', id: data.id ?? '未報告', tokens: data.usage ?? '未報告', received_at: receivedAt, response_headers_ms: timing.headersMs, timing_note: 'ヘッダー到着は最初のトークンの時間ではありません。', confidence: Object.fromEntries(Object.entries(data.answers).filter(([, a]) => a.confidence !== undefined).map(([id, a]) => [id, a.confidence])), confidence_note: 'confidenceは分布の集中度です。正解率ではありません。' };
+    const meta = { requested_model: MODEL.id, returned_model: data.model, model_identity: identity, provider: data.provider ?? '未報告', id: data.id ?? '未報告', tokens: data.usage ?? '未報告', received_at: receivedAt, response_headers_ms: timing.headersMs, timing_note: 'ヘッダー到着は最初のトークンの時間ではありません。', confidence: Object.fromEntries(Object.entries(data.answers).filter(([, a]) => a.confidence !== undefined).map(([id, a]) => [id, a.confidence])), confidence_note: 'confidenceは分布の集中度です。正解率ではありません。' };
     root.append(rawDetails('モデル・計測の詳細', meta), rawDetails('APIの生の応答（JSON）', data), rawDetails('この結果の入力・判断基準（JSON）', record.request));
   } else {
     try { renderQuestionResults(root, buildRequest(record.state, record.questions)); }
@@ -203,7 +205,7 @@ function renderSession() {
   const stats = summarizeRuns(history); $('session-count').textContent = String(sessionAttempts); $('session-successes').textContent = String(stats.successes);
   $('session-median').textContent = formatMs(stats.medianMs); $('session-cost').textContent = history.length && stats.missingCosts !== history.length ? formatMoney(stats.reportedCost) : '—';
   $('hero-measurement').textContent = stats.medianMs !== null ? `${formatMs(stats.medianMs)} / n=${stats.successes - stats.unverifiedModels}` : stats.unverifiedModels ? '返却モデルIDを確認' : '未計測';
-  $('cost-note').textContent = stats.missingCosts ? `料金未報告の試行が${stats.missingCosts}件あります。表示料金は合計請求額ではありません。中断・エラーでも課金される場合があります。` : '料金は応答のusage.costの合計です。結果とキーはこのタブのメモリだけに保持し、リロードで消えます。';
+  $('cost-note').textContent = stats.missingCosts ? `料金未報告の試行が${stats.missingCosts}件あります。表示料金は合計請求額ではありません。中断・エラーでも課金される場合があります。` : '料金は応答のusage.costの合計です。結果と実行履歴はリロードで消えます。保存したキーはこのブラウザーに残ります。';
 }
 async function run() {
   if (running || !apiKey || sessionAttempts >= LIMITS.maxRuns || Date.now() - lastAttemptAt < LIMITS.cooldownMs) return;
@@ -220,7 +222,7 @@ async function run() {
   } catch (error) {
     record.error = { message: error.message, status: error.status ?? null, body: error.body ?? null, timing: error.timing ?? null };
     history.push({ error: record.error });
-    if (error.status === 401 || error.status === 403) { apiKey = ''; $('consent').checked = false; }
+    if (error.status === 401 || error.status === 403) removeKey('認証が拒否されたため、保存したキーを削除しました。キーを確認して再設定してください。');
   } finally {
     clearTimeout(timeout); running = false; activeController = null;
     renderOutput(); renderGallery(); renderSession(); updateControls();
@@ -228,24 +230,50 @@ async function run() {
   }
 }
 
+function keyNotice(message, issue = false) {
+  keyStorageIssue = issue;
+  $('key-storage-notice').textContent = message;
+  $('key-storage-notice').hidden = !message;
+}
+function restoreKey() {
+  const saved = readSavedKey(); apiKey = saved.key;
+  $('consent').checked = !!apiKey;
+  if (saved.status === 'unavailable') keyNotice('保存したキーを読み込めません。このタブではキーを使用しません。ブラウザーの保存設定を確認してください。', true);
+  else if (saved.status === 'invalid') keyNotice('保存したキーの形式を確認できません。「APIキーを設定」から保存データを削除し、再設定してください。', true);
+  else keyNotice('');
+}
 function openConnection() {
   if (running) return;
   $('api-key').value = ''; $('connection-error').hidden = true; $('connection-dialog').showModal();
+  $('key-storage-status').textContent = apiKey ? 'キーはこのブラウザーに保存済みです。値は表示しません。変更するときだけ新しいキーを入力してください。' : keyStorageIssue ? '保存領域の読み書きを確認できません。削除を再試行できます。' : '保存したキーはありません。';
   $('api-key').focus();
 }
-function removeKey() { apiKey = ''; $('api-key').value = ''; $('consent').checked = false; updateControls(); }
+function removeKey(successMessage = 'このブラウザーからキーを削除しました。') {
+  apiKey = ''; $('api-key').value = ''; $('consent').checked = false;
+  const deleted = deleteSavedKey();
+  keyNotice(deleted.ok ? successMessage : 'このタブのキーは消去しましたが、ブラウザーに保存したキーの削除を確認できません。接続設定から削除を再試行するか、ブラウザーのサイトデータを削除してください。', !deleted.ok);
+  updateControls();
+  return deleted.ok;
+}
 $('connection-form').addEventListener('submit', event => {
   event.preventDefault(); const candidate = $('api-key').value.trim();
   let error = '';
-  if (!/^sk-or-v1-[A-Za-z0-9_-]{16,480}$/.test(candidate)) error = 'OpenRouterのAPIキー（sk-or-v1-で始まる文字列）を入力してください。';
-  else if (!$('consent').checked) error = '入力の送信先とAPI料金について確認してください。';
+  if (!isApiKey(candidate)) error = 'OpenRouterのAPIキー（sk-or-v1-で始まる文字列）を入力してください。';
+  else if (!$('consent').checked) error = 'ブラウザーへの保存、入力の送信先とAPI料金について確認してください。';
   if (error) { $('connection-error').textContent = error; $('connection-error').hidden = false; return; }
-  apiKey = candidate; $('api-key').value = ''; $('connection-dialog').close(); updateControls();
+  const saved = saveKey(candidate); $('api-key').value = '';
+  if (!saved.ok) {
+    apiKey = ''; $('consent').checked = false;
+    keyNotice('キーの保存を確認できません。このタブではキーを使用しません。ブラウザーの保存設定を確認し、残った保存データがあれば削除してください。', true);
+    $('connection-error').textContent = '保存できませんでした。設定完了にはしていません。ブラウザーの保存を許可してから再入力してください。';
+    $('connection-error').hidden = false; updateControls(); return;
+  }
+  apiKey = candidate; keyNotice(''); $('connection-dialog').close(); updateControls();
 });
 $('open-connection').addEventListener('click', openConnection); $('connect-inline').addEventListener('click', openConnection);
 $('close-connection').addEventListener('click', () => $('connection-dialog').close());
 $('connection-dialog').addEventListener('close', () => { $('api-key').value = ''; });
-$('remove-key').addEventListener('click', () => { removeKey(); $('connection-dialog').close(); });
+$('remove-key').addEventListener('click', () => { if (removeKey()) $('connection-dialog').close(); else { $('connection-error').textContent = $('key-storage-notice').textContent; $('connection-error').hidden = false; } });
 for (const name of ['state', 'questions']) {
   $(`${name}-tab`).addEventListener('click', () => selectTab(name));
   $(`${name}-tab`).addEventListener('keydown', event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'state' : event.key === 'End' ? 'questions' : name === 'state' ? 'questions' : 'state'; selectTab(next); $(`${next}-tab`).focus(); } });
@@ -267,5 +295,11 @@ $('export-button').addEventListener('click', () => {
   const report = { identity: record.result?.identity ?? null, title: 'Decision Atelier — actual API run', example: currentId, request: record.request, response: record.result?.data ?? null, timing: record.result?.timing ?? record.error?.timing ?? null, receivedAt: record.result?.receivedAt ?? null, error: record.error, measurement_note: 'Total round-trip including network, routing, provider, reading and parsing; headers are not first-token time.' };
   const url = URL.createObjectURL(new Blob([pretty(report)], { type: 'application/json' })); const link = el('a'); link.href = url; link.download = `decision-${currentId}-${Date.now()}.json`; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-window.addEventListener('pagehide', () => { activeController?.abort('pagehide'); removeKey(); });
-renderSelected(); renderSession();
+window.addEventListener('pagehide', () => { activeController?.abort('pagehide'); apiKey = ''; $('api-key').value = ''; });
+window.addEventListener('pageshow', event => { if (event.persisted) { restoreKey(); updateControls(); } });
+window.addEventListener('storage', event => {
+  if (event.key === KEY_STORAGE_NAME || event.key === null) {
+    activeController?.abort('key-changed'); restoreKey(); updateControls();
+  }
+});
+restoreKey(); renderSelected(); renderSession();

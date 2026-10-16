@@ -39,3 +39,23 @@ test('TEST-ONLY-MOCK mobile choice result remains readable without horizontal sc
   expect(mockNetwork.requests).toHaveLength(1);
   await saveMockScreenshot(page, testInfo, 'mobile-choice-response');
 });
+
+test('TEST-ONLY-MOCK mobile saved-key dialog stays within the viewport and keeps the key masked', async ({ page, mockNetwork }, testInfo) => {
+  await openApp(page);
+  await connectMockKey(page);
+  await page.reload();
+  await expect(page.locator('#run-button')).toBeEnabled();
+  await page.locator('#open-connection').click();
+  await expect(page.locator('#api-key')).toHaveAttribute('type', 'password');
+  await expect(page.locator('#api-key')).toHaveValue('');
+  await expect(page.locator('#key-storage-status')).toContainText('保存済み');
+  const dialog = await page.locator('#connection-dialog').boundingBox();
+  const viewport = page.viewportSize();
+  expect(dialog.x).toBeGreaterThanOrEqual(0);
+  expect(dialog.x + dialog.width).toBeLessThanOrEqual(viewport.width + 1);
+  await expect(page.locator('#remove-key')).toBeVisible();
+  await saveMockScreenshot(page, testInfo, 'mobile-saved-key-dialog');
+  await page.locator('#remove-key').click();
+  await expect(page.locator('#run-button')).toBeDisabled();
+  expect(mockNetwork.requests).toHaveLength(0);
+});

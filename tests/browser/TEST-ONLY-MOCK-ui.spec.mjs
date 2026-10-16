@@ -1,7 +1,8 @@
+import { KEY_STORAGE_NAME } from '../../public/credentials.js';
 import { EXAMPLES } from '../../public/examples.js';
 import { PRESENTATION } from '../../public/presentation.js';
 import {
-  test, expect, openApp, connectMockKey, saveMockScreenshot,
+  test, expect, openApp, connectMockKey, saveMockScreenshot, TEST_ONLY_MOCK_KEY,
   choiceResponse, scoreResponse, noulResponse, rateLimitResponse,
 } from './TEST-ONLY-MOCK.fixtures.mjs';
 
@@ -219,5 +220,145 @@ test('TEST-ONLY-MOCK every question displays its own result including a later co
   await expect(page.locator('.result-summary-choice strong')).toHaveText('技術サポート');
   await expect(page.locator('.result-summary-score strong')).toHaveText('2.55 / 3');
   await expect(page.locator('.result-question').nth(1).locator('[data-option-key]')).toHaveCount(4);
+  expect(mockNetwork.requests).toHaveLength(1);
+});
+
+test('TEST-ONLY-MOCK documented canonical model has no warning and contributes to timing', async ({ page, mockNetwork }) => {
+  await openApp(page);
+  const body = choiceResponse();
+  body.model = 'microsoft/microsoft-decision-1-20261009';
+  await runFixture(page, mockNetwork, body);
+  await expect(page.locator('#live-status')).toHaveText('実APIの結果');
+  await expect(page.locator('.result-stale')).toHaveCount(0);
+  await expect(page.locator('#session-median')).not.toHaveText('—');
+  await expect(page.locator('#hero-measurement')).toContainText('n=1');
+  await page.getByText('モデル・計測の詳細', { exact: true }).click();
+  await expect(output(page)).toContainText('"requested_model": "microsoft/microsoft-decision-1"');
+  await expect(output(page)).toContainText('"returned_model": "microsoft/microsoft-decision-1-20261009"');
+  await expect(output(page)).toContainText('documented-canonical-id');
+  expect(mockNetwork.requests[0].model).toBe('microsoft/microsoft-decision-1');
+  expect(mockNetwork.requests).toHaveLength(1);
+});
+
+test('TEST-ONLY-MOCK unknown dated model stays visible and excluded from timing', async ({ page, mockNetwork }) => {
+  await openApp(page);
+  const body = choiceResponse();
+  body.model = 'microsoft/microsoft-decision-1-20991231';
+  await runFixture(page, mockNetwork, body);
+  await expect(page.locator('#live-status')).toHaveText('結果あり・モデルID要確認');
+  await expect(page.locator('.result-stale')).toContainText('microsoft/microsoft-decision-1-20991231');
+  await expect(page.locator('.result-stale')).toContainText('速度の集計から除外');
+  await expect(page.locator('#session-median')).toHaveText('—');
+  await expect(page.locator('#hero-measurement')).toHaveText('返却モデルIDを確認');
+  await expect(row(page, 'technical_support').locator('.result-percent')).toHaveText('80.0%');
+  expect(mockNetwork.requests).toHaveLength(1);
+});
+
+test('TEST-ONLY-MOCK saved key survives reload masked, without automatic API traffic, and deletion survives reload', async ({ page, mockNetwork }, testInfo) => {
+  await openApp(page);
+  await connectMockKey(page);
+  await expect(page.locator('#connection-label')).toHaveText('キー保存済み');
+  await expect(page.locator('#api-key')).toHaveAttribute('type', 'password');
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBe(TEST_ONLY_MOCK_KEY);
+  await page.reload();
+  await expect(page.locator('#run-button')).toBeEnabled();
+  await expect(page.locator('#connection-label')).toHaveText('キー保存済み');
+  await expect(page.locator('#api-key')).toHaveValue('');
+  await expect(page.locator('#session-count')).toHaveText('0');
+  expect(mockNetwork.requests).toHaveLength(0);
+  await page.locator('#open-connection').click();
+  await expect(page.locator('#key-storage-status')).toContainText('保存済み');
+  await expect(page.locator('#connection-dialog')).not.toContainText(TEST_ONLY_MOCK_KEY);
+  await saveMockScreenshot(page, testInfo, 'saved-key-dialog');
+  await page.locator('#remove-key').click();
+  await expect(page.locator('#run-button')).toBeDisabled();
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBeNull();
+  await page.reload();
+  await expect(page.locator('#run-button')).toBeDisabled();
+  await expect(page.locator('#connection-label')).toHaveText('APIキーを設定');
+  expect(mockNetwork.requests).toHaveLength(0);
+});
+
+test('TEST-ONLY-MOCK failed storage write never enables inference or claims saved', async ({ page, mockNetwork }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('TEST-ONLY-MOCK blocked write', 'QuotaExceededError'); };
+  });
+  await openApp(page);
+  await page.locator('#open-connection').click();
+  await page.locator('#api-key').fill(TEST_ONLY_MOCK_KEY);
+  await page.locator('#consent').check();
+  await page.locator('#connection-form button[type="submit"]').click();
+  await expect(page.locator('#connection-dialog')).toBeVisible();
+  await expect(page.locator('#connection-error')).toContainText('保存できませんでした');
+  await expect(page.locator('#connection-label')).toHaveText('APIキーを設定');
+  await expect(page.locator('#run-button')).toBeDisabled();
+  await expect(page.locator('#api-key')).toHaveValue('');
+  expect(mockNetwork.requests).toHaveLength(0);
+});
+
+test('TEST-ONLY-MOCK failed storage read is visible and no key becomes active', async ({ page, mockNetwork }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.getItem = () => { throw new DOMException('TEST-ONLY-MOCK blocked read', 'SecurityError'); };
+  });
+  await openApp(page);
+  await expect(page.locator('#key-storage-notice')).toContainText('読み込めません');
+  await expect(page.locator('#run-button')).toBeDisabled();
+  expect(mockNetwork.requests).toHaveLength(0);
+});
+
+test('TEST-ONLY-MOCK failed deletion clears active memory and explains that storage may remain', async ({ page, mockNetwork }) => {
+  await openApp(page);
+  await connectMockKey(page);
+  await page.evaluate(() => {
+    Storage.prototype.removeItem = () => { throw new DOMException('TEST-ONLY-MOCK blocked deletion', 'SecurityError'); };
+  });
+  await page.locator('#open-connection').click();
+  await page.locator('#remove-key').click();
+  await expect(page.locator('#connection-dialog')).toBeVisible();
+  await expect(page.locator('#connection-error')).toContainText('削除を確認できません');
+  await expect(page.locator('#run-button')).toBeDisabled();
+  await expect(page.locator('#api-key')).toHaveValue('');
+  await expect(page.locator('#connection-label')).toHaveText('APIキーを設定');
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBe(TEST_ONLY_MOCK_KEY);
+  expect(mockNetwork.requests).toHaveLength(0);
+});
+
+test('TEST-ONLY-MOCK removing saved key updates another open tab without making a request', async ({ page, context, mockNetwork }) => {
+  await openApp(page);
+  await connectMockKey(page);
+  const other = await context.newPage();
+  await openApp(other);
+  await expect(other.locator('#run-button')).toBeEnabled();
+  await page.locator('#open-connection').click();
+  await page.locator('#remove-key').click();
+  await expect(other.locator('#run-button')).toBeDisabled();
+  await expect(other.locator('#connection-label')).toHaveText('APIキーを設定');
+  await other.close();
+  expect(mockNetwork.requests).toHaveLength(0);
+});
+
+test('TEST-ONLY-MOCK rejected saved key is deleted and redacted from UI, logs, URLs and exported error', async ({ page, mockNetwork }) => {
+  const logs = [];
+  page.on('console', message => logs.push(message.text()));
+  page.on('pageerror', error => logs.push(error.message));
+  await openApp(page);
+  await runFixture(page, mockNetwork, { error: { message: TEST_ONLY_MOCK_KEY + ' rejected' } }, { status: 401 });
+  await expect(page.locator('#live-status')).toHaveText('取得に失敗');
+  await expect(page.locator('#run-button')).toBeDisabled();
+  expect(await page.evaluate(name => localStorage.getItem(name), KEY_STORAGE_NAME)).toBeNull();
+  await expect(page.locator('#output-content')).not.toContainText(TEST_ONLY_MOCK_KEY);
+  await expect(page.locator('body')).not.toContainText(TEST_ONLY_MOCK_KEY);
+  expect(page.url()).not.toContain(TEST_ONLY_MOCK_KEY);
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#export-button').click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  let exported = '';
+  for await (const chunk of stream) exported += chunk.toString();
+  expect(exported).not.toContain(TEST_ONLY_MOCK_KEY);
+  expect(exported).toContain('[REDACTED]');
+  expect(logs.join('\n')).not.toContain(TEST_ONLY_MOCK_KEY);
+  await page.reload();
+  await expect(page.locator('#run-button')).toBeDisabled();
   expect(mockNetwork.requests).toHaveLength(1);
 });
